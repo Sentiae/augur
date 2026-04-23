@@ -1,0 +1,50 @@
+app:
+  name: infrastructure-intelligence-service
+  version: dev
+  environment: development
+
+logging:
+  level: info
+  format: json
+  output: stdout
+
+server:
+  http:
+    enabled: true
+    host: 0.0.0.0
+    port: "8089"
+    base_path: /api/v1
+    timeouts:
+      read: 15s
+      write: 15s
+      idle: 60s
+      shutdown: 30s
+  grpc:
+    enabled: true
+    host: 0.0.0.0
+    port: "50059"
+
+database:
+  postgres:
+    host: localhost
+    port: "5432"
+    user: postgres
+    password: postgres
+    database: augur_service
+    ssl_mode: disable
+    pool:
+      max_open_conns: 25
+      max_idle_conns: 10
+      max_lifetime: 5m
+      max_idle_time: 10m
+    log_level: warn
+
+engine:
+  decision_interval_sec: 30
+  observation_period_days: 7
+  cooldown_scale_up: 60s
+  cooldown_scale_down: 300s
+  max_actions_per_hour: 6
+  circuit_breaker_threshold: 3
+  rollback_window_min: 5
+  post_deploy_observe_min: 15

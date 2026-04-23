@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+package augur.v1;
+
+option go_package = "github.com/sentiae/infrastructure-intelligence-service/gen/proto/augur/v1;augurv1";
+
+import "google/protobuf/timestamp.proto";
+
+// AugurAgentService handles bidirectional streaming between edge agents and the control plane
+service AugurAgentService {
+  // MetricsStream is a bidirectional stream for edge agents to send metrics and receive scaling commands
+  rpc MetricsStream(stream AgentMetricsReport) returns (stream ScalingCommand);
+
+  // RegisterAgent registers an edge agent with the control plane
+  rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
+
+  // ReportOutcome reports the result of a scaling action back to the control plane
+  rpc ReportOutcome(ScalingOutcomeReport) returns (ScalingOutcomeResponse);
+
+  // GetPolicy fetches the resolved policy for a workload
+  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
+
+  // DispatchDeploy asks the control plane to forward a deploy instruction
+  // to a specific connected edge agent. Unlike ScalingCommand (which flows
+  // as part of the MetricsStream), DispatchDeploy is a unary RPC callers
+  // use when they already know which agent_id should execute the deploy.
+  // B23 — bridges ops-service to the connected-agent map managed here.
+  rpc DispatchDeploy(DispatchDeployRequest) returns (DispatchDeployResponse);
+
+  // GetAgentStatus reports whether a given agent_id is currently
+  // connected, plus its last-seen timestamp and workload bindings. B23 —
+  // lets callers heartbeat-poll augur without re-establishing a stream.
+  rpc GetAgentStatus(GetAgentStatusRequest) returns (GetAgentStatusResponse);
+}
+
+// AgentMetricsReport is sent by edge agents every 10-60 seconds
+message AgentMetricsReport {
+  string agent_id = 1;
+  string workload_id = 2;
+  google.protobuf.Timestamp timestamp = 3;
+
+  // Resource metrics
+  double cpu_utilization_pct = 4;
+  double memory_utilization_pct = 5;
+  double requests_per_sec = 6;
+  double latency_p99_ms = 7;
+  double error_rate_pct = 8;
+  int32 current_replicas = 9;
+  double queue_depth = 10;
+
+  // Agent health
+  string agent_status = 11; // connected, degraded, disconnected
+  bool degraded_mode = 12;
+}
+
+// ScalingCommand is sent by the control plane to edge agents
+message ScalingCommand {
+  string command_id = 1;
+  string workload_id = 2;
+  string action = 3; // scale_up, scale_down, set_replicas, rollback, deploy
+  int32 target_replicas = 4;
+  string reasoning = 5;
+  string trigger = 6; // reactive, predictive, slo, manual, cost, deploy
+  double confidence = 7;
+  bool dry_run = 8;
+  google.protobuf.Timestamp issued_at = 9;
+
+  // Deploy payload — populated when action == "deploy". The edge agent
+  // pulls the artifact from artifact_url, runs deploy_script inside the
+  // target workload, and reports back via ScalingOutcomeReport.
+  string artifact_url = 10;
+  string deploy_script = 11;
+  string version = 12;
+}
+
+// RegisterAgentRequest is sent when an edge agent starts up
+message RegisterAgentRequest {
+  string agent_id = 1;
+  string agent_type = 2; // firecracker, kubernetes, vm, serverless
+  string hostname = 3;
+  string region = 4;
+  string availability_zone = 5;
+  repeated string workload_ids = 6;
+  map<string, string> labels = 7;
+}
+
+message RegisterAgentResponse {
+  bool success = 1;
+  string message = 2;
+  int32 metrics_interval_sec = 3; // how often to send metrics
+  string policy_version = 4; // latest policy hash for cache validation
+}
+
+// ScalingOutcomeReport is sent by edge agents after executing a scaling command
+message ScalingOutcomeReport {
+  string command_id = 1;
+  string workload_id = 2;
+  bool success = 3;
+  string outcome = 4; // healthy, degraded, failed
+  string error_message = 5;
+  int32 actual_replicas = 6;
+  google.protobuf.Timestamp completed_at = 7;
+}
+
+message ScalingOutcomeResponse {
+  bool acknowledged = 1;
+}
+
+// GetPolicyRequest fetches the resolved policy for a workload
+message GetPolicyRequest {
+  string workload_id = 1;
+  string organization_id = 2;
+}
+
+message GetPolicyResponse {
+  string optimization_mode = 1;
+  int32 min_replicas = 2;
+  int32 max_replicas = 3;
+  double max_budget_usd = 4;
+  bool enable_spot = 5;
+  double weight_cost = 6;
+  double weight_performance = 7;
+  double weight_reliability = 8;
+  string policy_version = 9;
+}
+
+// DispatchDeployRequest carries the deploy envelope to send to an agent.
+// B23.
+message DispatchDeployRequest {
+  string agent_id = 1;       // target agent_id (must be connected)
+  string workload_id = 2;    // logical workload the deploy targets
+  string deployment_id = 3;  // caller-side deployment id (returned as external_id)
+  string artifact_url = 4;   // URL the agent pulls the build artifact from
+  string deploy_script = 5;  // optional shell script to run post-fetch
+  string version = 6;        // build version / tag
+  string reasoning = 7;      // human-readable reason for audit
+  bool dry_run = 8;
+}
+
+message DispatchDeployResponse {
+  bool dispatched = 1;       // true when the command was enqueued to the agent stream
+  string command_id = 2;     // augur-minted command id (same id the agent reports back with)
+  string message = 3;
+}
+
+// GetAgentStatusRequest is a simple lookup for one agent_id. B23.
+message GetAgentStatusRequest {
+  string agent_id = 1;
+}
+
+message GetAgentStatusResponse {
+  bool connected = 1;
+  string agent_type = 2;
+  string hostname = 3;
+  google.protobuf.Timestamp last_seen = 4;
+  repeated string workload_ids = 5;
+}
