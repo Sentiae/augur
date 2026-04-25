@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
+	"time"
 
 	grpcHandler "github.com/sentiae/infrastructure-intelligence-service/internal/handler/grpc"
 	"github.com/sentiae/infrastructure-intelligence-service/internal/handler/http"
@@ -154,6 +156,11 @@ func (c *Container) initInfrastructure() {
 			c.Config.GetAugurEventsTopic(),
 			true,
 		)
+		ensureCtx, ensureCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if err := c.EventPublisher.EnsureTopics(ensureCtx); err != nil {
+			log.Printf("Warning: infrastructure-intelligence-service Kafka EnsureTopics failed: %v (continuing)", err)
+		}
+		ensureCancel()
 	} else {
 		c.EventPublisher = events.NewNoopPublisher()
 	}
