@@ -3,8 +3,11 @@ package grpc
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 
+	"github.com/sentiae/platform-kit/interceptor"
+	"github.com/sentiae/platform-kit/tenant"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -17,6 +20,13 @@ import (
 type ServerConfig struct {
 	Host string
 	Port string
+
+	// gRPC auth interceptor (platform-kit tenant): ServiceAPIKey is the shared
+	// x-api-key secret validated against inbound service callers; JWKSURL +
+	// JWTIssuer configure the JWKS-backed user-token validator.
+	ServiceAPIKey string
+	JWKSURL       string
+	JWTIssuer     string
 }
 
 // Server wraps a google.golang.org/grpc server together with the application's
@@ -33,7 +43,39 @@ type Server struct {
 // NewServer constructs a Server wrapping the provided AgentServer. Callers are
 // expected to start it via Start and tear it down via GracefulStop.
 func NewServer(cfg ServerConfig, agentServer *AgentServer) *Server {
-	grpcSrv := grpc.NewServer()
+	// Mandatory server interceptor chain (CLAUDE.md §23): Recovery → Logging →
+	// Auth, built by interceptor.NewChain. Auth layers a service-token
+	// (x-api-key) validator with a JWKS-backed user-token validator so handlers
+	// derive the trusted actor from the verified principal (tenant.FromContext)
+	// instead of the spoofable request body. Health + reflection are skipped so
+	// k8s probes and grpcurl keep working unauthenticated. Both unary and stream
+	// chains are installed — the stream chain covers the bidirectional
+	// MetricsStream RPC.
+	svcToken := tenant.ServiceTokenValidator{Expected: cfg.ServiceAPIKey}
+	jwks, err := tenant.NewJWKSValidator(tenant.JWKSConfig{JWKSURL: cfg.JWKSURL, Issuer: cfg.JWTIssuer})
+	if err != nil {
+		// Degrade to api-key-only auth rather than failing boot — a missing or
+		// unreachable JWKS endpoint must not block the edge-agent control plane.
+		logger.Warn("JWKS validator init failed, falling back to api-key-only auth: %v", err)
+		jwks = nil
+	}
+	unary, stream := interceptor.NewChain(interceptor.Config{
+		Logger: slog.Default(),
+		Auth: &interceptor.AuthConfig{
+			APIKeyValidator: svcToken,
+			TokenValidator:  jwks,
+			SkipMethods: []string{
+				"/grpc.health.v1.Health/Check",
+				"/grpc.health.v1.Health/Watch",
+				"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
+				"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
+			},
+		},
+	})
+	grpcSrv := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(unary...),
+		grpc.ChainStreamInterceptor(stream...),
+	)
 
 	// Business service
 	agentServer.RegisterServer(grpcSrv)

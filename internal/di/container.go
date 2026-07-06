@@ -375,8 +375,11 @@ func (c *Container) initGRPC() {
 	}
 
 	c.GRPCServer = grpcHandler.NewServer(grpcHandler.ServerConfig{
-		Host: c.Config.Server.GRPC.Host,
-		Port: c.Config.Server.GRPC.Port,
+		Host:          c.Config.Server.GRPC.Host,
+		Port:          c.Config.Server.GRPC.Port,
+		ServiceAPIKey: c.Config.Security.Auth.ServiceAPIKey,
+		JWKSURL:       c.Config.Security.Auth.JWKSURL,
+		JWTIssuer:     c.Config.Security.Auth.JWTIssuer,
 	}, c.AgentServer)
 }
 

@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/metadata"
 
 	augurv1 "github.com/sentiae/infrastructure-intelligence-service/gen/proto/augur/v1"
 	internalgrpc "github.com/sentiae/infrastructure-intelligence-service/internal/handler/grpc"
@@ -22,8 +23,9 @@ func newTestServer(t *testing.T) (*internalgrpc.Server, string) {
 
 	agentSrv := internalgrpc.NewAgentServer(nil, nil, nil, nil, nil)
 	srv := internalgrpc.NewServer(internalgrpc.ServerConfig{
-		Host: "127.0.0.1",
-		Port: "0", // kernel-picked
+		Host:          "127.0.0.1",
+		Port:          "0", // kernel-picked
+		ServiceAPIKey: testServiceAPIKey,
 	}, agentSrv)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -52,9 +54,22 @@ func newTestServer(t *testing.T) (*internalgrpc.Server, string) {
 	return srv, srv.Addr()
 }
 
+// testServiceAPIKey is the shared service token the test server validates and
+// the test client presents as x-api-key (service-principal path).
+const testServiceAPIKey = "test-service-key"
+
 func dial(t *testing.T, addr string) *grpc.ClientConn {
 	t.Helper()
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Present a valid service credential on every unary call so the mandatory
+	// auth interceptor authenticates the caller as a trusted service.
+	injectAuth := func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-api-key", testServiceAPIKey, "x-service-name", "augur-test")
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(injectAuth),
+	)
 	if err != nil {
 		t.Fatalf("dial %s: %v", addr, err)
 	}

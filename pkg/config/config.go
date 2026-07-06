@@ -140,7 +140,8 @@ type ServiceEndpoint struct {
 
 // SecurityConfig contains security settings
 type SecurityConfig struct {
-	JWT JWTConfig `mapstructure:"jwt"`
+	JWT  JWTConfig  `mapstructure:"jwt"`
+	Auth AuthConfig `mapstructure:"auth"`
 }
 
 type JWTConfig struct {
@@ -149,6 +150,18 @@ type JWTConfig struct {
 	Audience  string        `mapstructure:"audience"`
 	Expiry    time.Duration `mapstructure:"expiry"`
 	Algorithm string        `mapstructure:"algorithm"`
+}
+
+// AuthConfig carries the service-to-service + user-token verification settings
+// for the gRPC auth interceptor (platform-kit tenant). Distinct from the HS256
+// JWT block above — this is the RS256/JWKS user token via identity-service.
+// ServiceAPIKey is the shared x-api-key secret validated against inbound
+// service callers; JWKSURL + JWTIssuer configure the JWKS-backed user-token
+// validator.
+type AuthConfig struct {
+	ServiceAPIKey string `mapstructure:"service_api_key"`
+	JWKSURL       string `mapstructure:"jwks_url"`
+	JWTIssuer     string `mapstructure:"jwt_issuer"`
 }
 
 // FeaturesConfig contains feature flags
@@ -280,6 +293,10 @@ func Load() (*Config, error) {
 			"security.jwt.expiry":    "24h",
 			"security.jwt.algorithm": "HS256",
 
+			// Security - gRPC auth interceptor (service token + JWKS user token)
+			"security.auth.jwks_url":   "http://identity-service:8080/.well-known/jwks.json",
+			"security.auth.jwt_issuer": "identity-service",
+
 			// Features
 			"features.event_publishing":   true,
 			"features.metrics_collection": true,
@@ -329,6 +346,9 @@ func Load() (*Config, error) {
 			{"services.foundry.url", "APP_SERVICES_FOUNDRY_URL"},
 			{"services.work.url", "APP_SERVICES_WORK_URL"},
 			{"security.jwt.secret", "APP_SECURITY_JWT_SECRET"},
+			{"security.auth.service_api_key", "APP_GRPC_SERVICE_API_KEY"},
+			{"security.auth.jwks_url", "APP_AUTH_JWKS_URL"},
+			{"security.auth.jwt_issuer", "APP_AUTH_JWT_ISSUER"},
 			{"features.event_publishing", "APP_FEATURES_EVENT_PUBLISHING"},
 			{"features.ml_prediction", "APP_FEATURES_ML_PREDICTION"},
 			{"features.spec_auto_creation", "APP_FEATURES_SPEC_AUTO_CREATION"},

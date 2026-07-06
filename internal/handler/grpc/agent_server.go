@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sentiae/platform-kit/tenant"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -180,6 +181,14 @@ func (s *AgentServer) GetPolicy(ctx context.Context, req *augurv1.GetPolicyReque
 	orgID, err := uuid.Parse(req.OrganizationId)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid organization_id")
+	}
+
+	// Layer-2 tenant isolation: the client supplies the target org, so verify
+	// the caller may act in it before reading its policies. Service principals
+	// (edge agents authenticated by x-api-key) pass; a user principal must be a
+	// member of orgID.
+	if err := tenant.AuthorizeOrg(ctx, orgID); err != nil {
+		return nil, err
 	}
 
 	global, _ := s.policyRepo.FindGlobal(ctx, orgID)
