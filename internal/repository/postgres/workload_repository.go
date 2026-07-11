@@ -23,7 +23,7 @@ func (r *WorkloadRepository) getDB(ctx context.Context) *gorm.DB {
 	if tx := TxFromContext(ctx); tx != nil {
 		return tx
 	}
-	return r.db
+	return r.db.WithContext(ctx)
 }
 
 func (r *WorkloadRepository) Create(ctx context.Context, w *domain.Workload) error {

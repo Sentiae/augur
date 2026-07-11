@@ -6,12 +6,17 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	pkgmiddleware "github.com/sentiae/platform-kit/middleware"
+
 	"github.com/sentiae/infrastructure-intelligence-service/internal/usecase"
 )
 
 // Server is the HTTP server with all routes
 type Server struct {
 	router              chi.Router
+	jwks                pkgmiddleware.TokenValidator
+	serviceAPIKey       string
+	orgResolver         OrgResolver
 	workloadService     *usecase.WorkloadService
 	decisionEngine      *usecase.DecisionEngine
 	sloEngine           *usecase.SLOEngine
@@ -28,6 +33,9 @@ type Server struct {
 }
 
 func NewServer(
+	jwks pkgmiddleware.TokenValidator,
+	serviceAPIKey string,
+	orgResolver OrgResolver,
 	workloadService *usecase.WorkloadService,
 	decisionEngine *usecase.DecisionEngine,
 	sloEngine *usecase.SLOEngine,
@@ -43,6 +51,9 @@ func NewServer(
 	crossClusterOpt *usecase.CrossClusterOptimizer,
 ) *Server {
 	s := &Server{
+		jwks:               jwks,
+		serviceAPIKey:      serviceAPIKey,
+		orgResolver:        orgResolver,
 		workloadService:    workloadService,
 		decisionEngine:     decisionEngine,
 		sloEngine:          sloEngine,
@@ -83,8 +94,13 @@ func (s *Server) setupRoutes() {
 		respondWithJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 
-	// API v1
+	// API v1 — authenticated surface. authMiddleware runs first so every route
+	// below requires a valid Bearer JWT (→ user principal) or x-api-key (→ service
+	// principal); /health + /ready above stay open. Handlers stamp the active org
+	// (D-073) before any RLS-forced read.
 	r.Route("/api/v1/augur", func(r chi.Router) {
+		r.Use(s.authMiddleware)
+
 		// Workloads
 		r.Route("/workloads", func(r chi.Router) {
 			r.Get("/", s.listWorkloads)

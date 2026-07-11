@@ -12,15 +12,17 @@ import (
 // Retention: 7 days at full resolution (matching VictoriaMetrics raw retention).
 type MetricsCleaner struct {
 	metricsRepo  *postgres.MetricsRepository
+	orgLister    OrgLister
 	retentionDays int
 }
 
-func NewMetricsCleaner(metricsRepo *postgres.MetricsRepository, retentionDays int) *MetricsCleaner {
+func NewMetricsCleaner(metricsRepo *postgres.MetricsRepository, orgLister OrgLister, retentionDays int) *MetricsCleaner {
 	if retentionDays <= 0 {
 		retentionDays = 7
 	}
 	return &MetricsCleaner{
 		metricsRepo:   metricsRepo,
+		orgLister:     orgLister,
 		retentionDays: retentionDays,
 	}
 }
@@ -43,10 +45,13 @@ func (c *MetricsCleaner) Run(ctx context.Context) {
 }
 
 func (c *MetricsCleaner) cleanup(ctx context.Context) {
-	cutoff := time.Now().Add(-time.Duration(c.retentionDays) * 24 * time.Hour)
-	if err := c.metricsRepo.DeleteOlderThan(ctx, cutoff); err != nil {
-		logger.Error("Metrics cleaner: failed to delete old metrics: %v", err)
-		return
-	}
-	logger.Info("Metrics cleaner: deleted metrics older than %s", cutoff.Format(time.RFC3339))
+	_ = ForEachOrg(ctx, c.orgLister, func(orgCtx context.Context) error {
+		cutoff := time.Now().Add(-time.Duration(c.retentionDays) * 24 * time.Hour)
+		if err := c.metricsRepo.DeleteOlderThan(orgCtx, cutoff); err != nil {
+			logger.Error("Metrics cleaner: failed to delete old metrics: %v", err)
+			return err
+		}
+		logger.Info("Metrics cleaner: deleted metrics older than %s", cutoff.Format(time.RFC3339))
+		return nil
+	})
 }

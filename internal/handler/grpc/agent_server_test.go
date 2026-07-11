@@ -5,8 +5,60 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	augurv1 "github.com/sentiae/infrastructure-intelligence-service/gen/proto/augur/v1"
+	internalgrpc "github.com/sentiae/infrastructure-intelligence-service/internal/handler/grpc"
 )
+
+// fakeOrgResolver is a test double for the D-072 by-id org resolver. It returns
+// the configured org (uuid.Nil ⇒ the "no such row" miss path) without touching a
+// database, so handler-level org-scoping logic can be exercised directly.
+type fakeOrgResolver struct {
+	decisionOrg uuid.UUID
+	workloadOrg uuid.UUID
+}
+
+func (f fakeOrgResolver) ResolveWorkloadOrg(context.Context, uuid.UUID) (uuid.UUID, error) {
+	return f.workloadOrg, nil
+}
+
+func (f fakeOrgResolver) ResolveDecisionOrg(context.Context, uuid.UUID) (uuid.UUID, error) {
+	return f.decisionOrg, nil
+}
+
+// TestAgentServer_ReportOutcome_UnknownDecision — a command_id whose decision the
+// resolver cannot map to an org (uuid.Nil) yields codes.NotFound so a cross-org
+// id can never probe existence (D-072). The resolve runs before RecordOutcome, so
+// the nil decision engine is never reached. Called directly (not over the gRPC
+// server) to bypass the pre-existing auth-interceptor rejection.
+func TestAgentServer_ReportOutcome_UnknownDecision(t *testing.T) {
+	srv := internalgrpc.NewAgentServer(nil, nil, nil, nil, nil, fakeOrgResolver{decisionOrg: uuid.Nil})
+
+	_, err := srv.ReportOutcome(context.Background(), &augurv1.ScalingOutcomeReport{
+		CommandId: uuid.New().String(),
+		Outcome:   "healthy",
+	})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("expected NotFound for unknown decision, got %v", err)
+	}
+}
+
+// TestAgentServer_ReportOutcome_RejectsInvalidCommandID — a non-uuid command_id is
+// an InvalidArgument before any org resolution.
+func TestAgentServer_ReportOutcome_RejectsInvalidCommandID(t *testing.T) {
+	srv := internalgrpc.NewAgentServer(nil, nil, nil, nil, nil, fakeOrgResolver{})
+
+	_, err := srv.ReportOutcome(context.Background(), &augurv1.ScalingOutcomeReport{
+		CommandId: "not-a-uuid",
+		Outcome:   "healthy",
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected InvalidArgument for bad command_id, got %v", err)
+	}
+}
 
 // TestAgentServer_GetAgentStatus_Unknown — unregistered agent_id returns
 // connected=false without erroring. B23: callers want a cheap heartbeat

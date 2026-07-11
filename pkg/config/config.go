@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -70,14 +71,20 @@ type DatabaseConfig struct {
 }
 
 type PostgresConfig struct {
-	Host     string     `mapstructure:"host"`
-	Port     string     `mapstructure:"port"`
-	User     string     `mapstructure:"user"`
-	Password string     `mapstructure:"password"`
-	Database string     `mapstructure:"database"`
-	SSLMode  string     `mapstructure:"ssl_mode"`
-	Pool     PoolConfig `mapstructure:"pool"`
-	LogLevel string     `mapstructure:"log_level"`
+	Host     string `mapstructure:"host"`
+	Port     string `mapstructure:"port"`
+	User     string `mapstructure:"user"`
+	Password string `mapstructure:"password"`
+	// MigrateUser/MigratePassword are the OWNER role credentials used for the
+	// short-lived schema-DDL connection (renames + AutoMigrate + RLS objects) in
+	// the D-070 role split. Empty -> falls back to User/Password, so an unsplit
+	// deploy behaves exactly as before (one effective role).
+	MigrateUser     string     `mapstructure:"migrate_user"`
+	MigratePassword string     `mapstructure:"migrate_password"`
+	Database        string     `mapstructure:"database"`
+	SSLMode         string     `mapstructure:"ssl_mode"`
+	Pool            PoolConfig `mapstructure:"pool"`
+	LogLevel        string     `mapstructure:"log_level"`
 }
 
 type PoolConfig struct {
@@ -235,6 +242,8 @@ func Load() (*Config, error) {
 			"database.postgres.port":                "5432",
 			"database.postgres.user":                "postgres",
 			"database.postgres.password":            "postgres",
+			"database.postgres.migrate_user":        "",
+			"database.postgres.migrate_password":    "",
 			"database.postgres.database":            "augur_service",
 			"database.postgres.ssl_mode":            "disable",
 			"database.postgres.pool.max_open_conns": 25,
@@ -331,6 +340,8 @@ func Load() (*Config, error) {
 			{"database.postgres.port", "APP_DATABASE_PORT"},
 			{"database.postgres.user", "APP_DATABASE_USER"},
 			{"database.postgres.password", "APP_DATABASE_PASSWORD"},
+			{"database.postgres.migrate_user", "APP_DATABASE_MIGRATE_USER"},
+			{"database.postgres.migrate_password", "APP_DATABASE_MIGRATE_PASSWORD"},
 			{"database.postgres.database", "APP_DATABASE_NAME"},
 			{"database.postgres.ssl_mode", "APP_DATABASE_SSL_MODE"},
 			{"cache.redis.host", "APP_REDIS_HOST"},
@@ -397,4 +408,20 @@ func (c *Config) GetAugurEventsTopic() string {
 // GetOpsEventsTopic returns the full ops events topic name
 func (c *Config) GetOpsEventsTopic() string {
 	return fmt.Sprintf("%s.%s", c.Messaging.Kafka.Topics.Prefix, c.Messaging.Kafka.Topics.OpsEvents)
+}
+
+// RLSStampEnabled gates the P4 RLS object apply (ApplyRLSObjects) at boot. Read
+// from APP_RLS_STAMP_ENABLED; unset or any non-"true" value returns false, so RLS
+// stays a no-op until it is explicitly switched on for the flip (D-070). Mirrors
+// work-service config.RLSStampEnabled().
+func RLSStampEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("APP_RLS_STAMP_ENABLED")), "true")
+}
+
+// RLSEnforceEnabled gates the read-path RLS enforcement (the tenantdb.Enforce GORM
+// plugin + boot posture assertion), wired in a later task. Read from
+// APP_RLS_ENFORCE_ENABLED; unset or any non-"true" value returns false. Kept OFF
+// during shadow, flipped ON alongside the non-owner app role at go-live (D-071).
+func RLSEnforceEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("APP_RLS_ENFORCE_ENABLED")), "true")
 }

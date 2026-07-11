@@ -119,13 +119,14 @@ func (s *WorkloadService) UpdateMetrics(ctx context.Context, workloadID uuid.UUI
 		snapshot.Timestamp = time.Now()
 	}
 
-	if err := s.metricsRepo.Create(ctx, snapshot); err != nil {
-		return err
-	}
-
-	// Update workload's current metrics
+	// Load the owning workload first so the snapshot carries its organization.
 	w, err := s.workloadRepo.FindByID(ctx, workloadID)
 	if err != nil {
+		return err
+	}
+	snapshot.OrganizationID = w.OrganizationID
+
+	if err := s.metricsRepo.Create(ctx, snapshot); err != nil {
 		return err
 	}
 

@@ -21,6 +21,7 @@ type PredictionEngine struct {
 	workloadRepo *postgres.WorkloadRepository
 	metricsRepo  *postgres.MetricsRepository
 	publisher    events.EventPublisher
+	orgLister    OrgLister
 	fftAnalyzer  *ml.FFTAnalyzer
 
 	// Cache of latest forecasts per workload
@@ -31,11 +32,13 @@ func NewPredictionEngine(
 	workloadRepo *postgres.WorkloadRepository,
 	metricsRepo *postgres.MetricsRepository,
 	publisher events.EventPublisher,
+	orgLister OrgLister,
 ) *PredictionEngine {
 	return &PredictionEngine{
 		workloadRepo: workloadRepo,
 		metricsRepo:  metricsRepo,
 		publisher:    publisher,
+		orgLister:    orgLister,
 		fftAnalyzer:  ml.NewFFTAnalyzer(),
 		forecasts:    make(map[uuid.UUID]*domain.Forecast),
 	}
@@ -59,26 +62,29 @@ func (e *PredictionEngine) Run(ctx context.Context) {
 }
 
 func (e *PredictionEngine) generateForecasts(ctx context.Context) {
-	workloads, err := e.workloadRepo.FindAllManaged(ctx)
-	if err != nil {
-		logger.Error("Prediction engine: failed to fetch workloads: %v", err)
-		return
-	}
-
-	for _, w := range workloads {
-		forecast, err := e.forecastWorkload(ctx, w.ID, 6) // 6-hour horizon default
+	_ = ForEachOrg(ctx, e.orgLister, func(orgCtx context.Context) error {
+		workloads, err := e.workloadRepo.FindAllManaged(orgCtx)
 		if err != nil {
-			logger.Debug("Prediction engine: skipping %s: %v", w.Name, err)
-			continue
+			logger.Error("Prediction engine: failed to fetch workloads: %v", err)
+			return err
 		}
 
-		e.forecasts[w.ID] = forecast
+		for _, w := range workloads {
+			forecast, err := e.forecastWorkload(orgCtx, w.ID, 6) // 6-hour horizon default
+			if err != nil {
+				logger.Debug("Prediction engine: skipping %s: %v", w.Name, err)
+				continue
+			}
 
-		// Check if we should publish a spike prediction event
-		if forecast.PredictedPeakPct > 100 && forecast.Confidence > 0.7 {
-			e.publishSpikePrediction(ctx, w, forecast)
+			e.forecasts[w.ID] = forecast
+
+			// Check if we should publish a spike prediction event
+			if forecast.PredictedPeakPct > 100 && forecast.Confidence > 0.7 {
+				e.publishSpikePrediction(orgCtx, w, forecast)
+			}
 		}
-	}
+		return nil
+	})
 }
 
 // GetForecast returns the latest forecast for a workload, or generates one on demand

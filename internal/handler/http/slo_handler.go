@@ -17,7 +17,13 @@ func (s *Server) getSLOStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, err := s.sloEngine.GetSLOStatus(r.Context(), workloadID)
+	ctx, err := s.stampWorkloadOrg(r.Context(), workloadID)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
+	status, err := s.sloEngine.GetSLOStatus(ctx, workloadID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -51,6 +57,12 @@ func (s *Server) createSLO(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx, err := authorizeAndStampOrg(r.Context(), orgID)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
 	windowDays := input.WindowDays
 	if windowDays == 0 {
 		windowDays = 30
@@ -65,7 +77,7 @@ func (s *Server) createSLO(w http.ResponseWriter, r *http.Request) {
 		Enabled:        true,
 	}
 
-	if err := s.sloEngine.CreateSLO(r.Context(), def); err != nil {
+	if err := s.sloEngine.CreateSLO(ctx, def); err != nil {
 		handleError(w, err)
 		return
 	}

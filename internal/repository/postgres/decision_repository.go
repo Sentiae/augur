@@ -24,7 +24,7 @@ func (r *DecisionRepository) getDB(ctx context.Context) *gorm.DB {
 	if tx := TxFromContext(ctx); tx != nil {
 		return tx
 	}
-	return r.db
+	return r.db.WithContext(ctx)
 }
 
 func (r *DecisionRepository) Create(ctx context.Context, d *domain.ScalingDecision) error {

@@ -19,17 +19,20 @@ type CostTracker struct {
 	costRepo     *postgres.CostRepository
 	workloadRepo *postgres.WorkloadRepository
 	publisher    events.EventPublisher
+	orgLister    OrgLister
 }
 
 func NewCostTracker(
 	costRepo *postgres.CostRepository,
 	workloadRepo *postgres.WorkloadRepository,
 	publisher events.EventPublisher,
+	orgLister OrgLister,
 ) *CostTracker {
 	return &CostTracker{
 		costRepo:     costRepo,
 		workloadRepo: workloadRepo,
 		publisher:    publisher,
+		orgLister:    orgLister,
 	}
 }
 
@@ -60,23 +63,26 @@ func (t *CostTracker) tick(ctx context.Context) {
 
 // updateWorkloadCosts computes hourly and monthly cost for each workload based on its type and replicas
 func (t *CostTracker) updateWorkloadCosts(ctx context.Context) {
-	workloads, err := t.workloadRepo.FindAllManaged(ctx)
-	if err != nil {
-		logger.Error("Cost tracker: failed to fetch workloads: %v", err)
-		return
-	}
-
-	for _, w := range workloads {
-		hourly := computeHourlyCost(w)
-		monthly := hourly * 730 // average hours per month
-
-		w.HourlyCostUSD = hourly
-		w.MonthlyCostUSD = monthly
-
-		if err := t.workloadRepo.Update(ctx, w); err != nil {
-			logger.Error("Cost tracker: failed to update cost for %s: %v", w.Name, err)
+	_ = ForEachOrg(ctx, t.orgLister, func(orgCtx context.Context) error {
+		workloads, err := t.workloadRepo.FindAllManaged(orgCtx)
+		if err != nil {
+			logger.Error("Cost tracker: failed to fetch workloads: %v", err)
+			return err
 		}
-	}
+
+		for _, w := range workloads {
+			hourly := computeHourlyCost(w)
+			monthly := hourly * 730 // average hours per month
+
+			w.HourlyCostUSD = hourly
+			w.MonthlyCostUSD = monthly
+
+			if err := t.workloadRepo.Update(orgCtx, w); err != nil {
+				logger.Error("Cost tracker: failed to update cost for %s: %v", w.Name, err)
+			}
+		}
+		return nil
+	})
 }
 
 // computeHourlyCost estimates hourly cost based on workload type and replicas
@@ -115,47 +121,50 @@ func computeHourlyCost(w *domain.Workload) float64 {
 
 // enforceBudgets checks budgets and publishes threshold events
 func (t *CostTracker) enforceBudgets(ctx context.Context) {
-	workloads, err := t.workloadRepo.FindAllManaged(ctx)
-	if err != nil {
-		return
-	}
-
-	// Group spend by organization
-	orgSpend := make(map[uuid.UUID]float64)
-	for _, w := range workloads {
-		orgSpend[w.OrganizationID] += w.MonthlyCostUSD
-	}
-
-	for orgID, spend := range orgSpend {
-		budgets, err := t.costRepo.FindBudgetsByOrg(ctx, orgID)
+	_ = ForEachOrg(ctx, t.orgLister, func(orgCtx context.Context) error {
+		workloads, err := t.workloadRepo.FindAllManaged(orgCtx)
 		if err != nil {
-			continue
+			return err
 		}
 
-		for _, b := range budgets {
-			if b.BudgetUSD <= 0 {
+		// Group spend by organization
+		orgSpend := make(map[uuid.UUID]float64)
+		for _, w := range workloads {
+			orgSpend[w.OrganizationID] += w.MonthlyCostUSD
+		}
+
+		for orgID, spend := range orgSpend {
+			budgets, err := t.costRepo.FindBudgetsByOrg(orgCtx, orgID)
+			if err != nil {
 				continue
 			}
 
-			usedPct := (spend / b.BudgetUSD) * 100
-			b.CurrentSpendUSD = spend
-			_ = t.costRepo.UpdateBudget(ctx, b)
+			for _, b := range budgets {
+				if b.BudgetUSD <= 0 {
+					continue
+				}
 
-			// Parse alert thresholds
-			thresholds := parseAlertPcts(b.AlertPcts)
+				usedPct := (spend / b.BudgetUSD) * 100
+				b.CurrentSpendUSD = spend
+				_ = t.costRepo.UpdateBudget(orgCtx, b)
 
-			for _, threshold := range thresholds {
-				if usedPct >= float64(threshold) {
-					t.publishThresholdEvent(ctx, b, spend, threshold)
+				// Parse alert thresholds
+				thresholds := parseAlertPcts(b.AlertPcts)
+
+				for _, threshold := range thresholds {
+					if usedPct >= float64(threshold) {
+						t.publishThresholdEvent(orgCtx, b, spend, threshold)
+					}
+				}
+
+				// At 100%: force cost mode on all workloads in this org
+				if usedPct >= 100 {
+					t.forceCostMode(orgCtx, orgID, workloads)
 				}
 			}
-
-			// At 100%: force cost mode on all workloads in this org
-			if usedPct >= 100 {
-				t.forceCostMode(ctx, orgID, workloads)
-			}
 		}
-	}
+		return nil
+	})
 }
 
 func (t *CostTracker) publishThresholdEvent(ctx context.Context, b *domain.CostBudget, actual float64, threshold int) {

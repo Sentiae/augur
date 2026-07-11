@@ -98,6 +98,7 @@ func (Workload) TableName() string {
 type WorkloadMetricsSnapshot struct {
 	ID             uuid.UUID `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	WorkloadID     uuid.UUID `json:"workload_id" gorm:"type:uuid;not null;index:idx_metrics_workload_ts"`
+	OrganizationID uuid.UUID `json:"organization_id" gorm:"type:uuid;index:idx_augur_metrics_org"`
 	Timestamp      time.Time `json:"timestamp" gorm:"not null;index:idx_metrics_workload_ts"`
 	CPUPct         float64   `json:"cpu_pct"`
 	MemoryPct      float64   `json:"memory_pct"`

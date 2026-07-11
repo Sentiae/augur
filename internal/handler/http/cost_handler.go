@@ -8,14 +8,9 @@ import (
 )
 
 func (s *Server) getCostReport(w http.ResponseWriter, r *http.Request) {
-	orgIDStr := r.URL.Query().Get("organization_id")
-	if orgIDStr == "" {
-		respondWithError(w, http.StatusBadRequest, "organization_id is required")
-		return
-	}
-	orgID, err := uuid.Parse(orgIDStr)
+	orgID, ctx, err := orgFromRequest(r)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "invalid organization_id")
+		respondOrgError(w, err)
 		return
 	}
 
@@ -29,7 +24,7 @@ func (s *Server) getCostReport(w http.ResponseWriter, r *http.Request) {
 		window = "mtd"
 	}
 
-	report, err := s.costAnalyzer.GetCostReport(r.Context(), orgID, scope, scopeID, window)
+	report, err := s.costAnalyzer.GetCostReport(ctx, orgID, scope, scopeID, window)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -58,7 +53,13 @@ func (s *Server) setCostBudget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.costAnalyzer.SetBudget(r.Context(), orgID, input.Scope, input.ScopeID, input.BudgetUSD, input.AlertPcts); err != nil {
+	ctx, err := authorizeAndStampOrg(r.Context(), orgID)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
+	if err := s.costAnalyzer.SetBudget(ctx, orgID, input.Scope, input.ScopeID, input.BudgetUSD, input.AlertPcts); err != nil {
 		handleError(w, err)
 		return
 	}
@@ -69,21 +70,16 @@ func (s *Server) setCostBudget(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getIdleResources(w http.ResponseWriter, r *http.Request) {
-	orgIDStr := r.URL.Query().Get("organization_id")
-	if orgIDStr == "" {
-		respondWithError(w, http.StatusBadRequest, "organization_id is required")
-		return
-	}
-	orgID, err := uuid.Parse(orgIDStr)
+	orgID, ctx, err := orgFromRequest(r)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "invalid organization_id")
+		respondOrgError(w, err)
 		return
 	}
 
 	resourceType := r.URL.Query().Get("resource_type")
 	minIdleDays := 7 // default
 
-	resources, err := s.costAnalyzer.GetIdleResources(r.Context(), orgID, resourceType, minIdleDays)
+	resources, err := s.costAnalyzer.GetIdleResources(ctx, orgID, resourceType, minIdleDays)
 	if err != nil {
 		handleError(w, err)
 		return

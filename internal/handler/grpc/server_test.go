@@ -21,7 +21,7 @@ import (
 func newTestServer(t *testing.T) (*internalgrpc.Server, string) {
 	t.Helper()
 
-	agentSrv := internalgrpc.NewAgentServer(nil, nil, nil, nil, nil)
+	agentSrv := internalgrpc.NewAgentServer(nil, nil, nil, nil, nil, nil)
 	srv := internalgrpc.NewServer(internalgrpc.ServerConfig{
 		Host:          "127.0.0.1",
 		Port:          "0", // kernel-picked

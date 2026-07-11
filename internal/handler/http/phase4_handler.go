@@ -17,7 +17,13 @@ func (s *Server) detectAnomalyMultiLayer(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	score, err := s.multiLayerDetector.Detect(r.Context(), id)
+	ctx, err := s.stampWorkloadOrg(r.Context(), id)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
+	score, err := s.multiLayerDetector.Detect(ctx, id)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -40,7 +46,13 @@ func (s *Server) trainAnomalyModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.multiLayerDetector.TrainModels(r.Context(), id); err != nil {
+	ctx, err := s.stampWorkloadOrg(r.Context(), id)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
+	if err := s.multiLayerDetector.TrainModels(ctx, id); err != nil {
 		handleError(w, err)
 		return
 	}
@@ -54,14 +66,9 @@ func (s *Server) trainAnomalyModels(w http.ResponseWriter, r *http.Request) {
 // --- RI / Savings Plan Recommendations ---
 
 func (s *Server) getRIRecommendation(w http.ResponseWriter, r *http.Request) {
-	orgIDStr := r.URL.Query().Get("organization_id")
-	if orgIDStr == "" {
-		respondWithError(w, http.StatusBadRequest, "organization_id is required")
-		return
-	}
-	orgID, err := uuid.Parse(orgIDStr)
+	orgID, ctx, err := orgFromRequest(r)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "invalid organization_id")
+		respondOrgError(w, err)
 		return
 	}
 
@@ -72,7 +79,7 @@ func (s *Server) getRIRecommendation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	portfolio, err := s.riRecommender.Recommend(r.Context(), orgID, windowDays)
+	portfolio, err := s.riRecommender.Recommend(ctx, orgID, windowDays)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -84,18 +91,13 @@ func (s *Server) getRIRecommendation(w http.ResponseWriter, r *http.Request) {
 // --- Cross-Cluster Optimization ---
 
 func (s *Server) getPlacementRecommendation(w http.ResponseWriter, r *http.Request) {
-	orgIDStr := r.URL.Query().Get("organization_id")
-	if orgIDStr == "" {
-		respondWithError(w, http.StatusBadRequest, "organization_id is required")
-		return
-	}
-	orgID, err := uuid.Parse(orgIDStr)
+	orgID, ctx, err := orgFromRequest(r)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "invalid organization_id")
+		respondOrgError(w, err)
 		return
 	}
 
-	recs, err := s.crossClusterOpt.AnalyzePlacement(r.Context(), orgID)
+	recs, err := s.crossClusterOpt.AnalyzePlacement(ctx, orgID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -105,18 +107,13 @@ func (s *Server) getPlacementRecommendation(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) getInstanceTypeRecommendation(w http.ResponseWriter, r *http.Request) {
-	orgIDStr := r.URL.Query().Get("organization_id")
-	if orgIDStr == "" {
-		respondWithError(w, http.StatusBadRequest, "organization_id is required")
-		return
-	}
-	orgID, err := uuid.Parse(orgIDStr)
+	orgID, ctx, err := orgFromRequest(r)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "invalid organization_id")
+		respondOrgError(w, err)
 		return
 	}
 
-	recs, err := s.crossClusterOpt.RecommendInstanceTypes(r.Context(), orgID)
+	recs, err := s.crossClusterOpt.RecommendInstanceTypes(ctx, orgID)
 	if err != nil {
 		handleError(w, err)
 		return

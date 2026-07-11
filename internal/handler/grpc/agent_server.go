@@ -21,6 +21,16 @@ import (
 	"github.com/sentiae/infrastructure-intelligence-service/pkg/logger"
 )
 
+// OrgResolver resolves the owning org of a by-id resource via the D-072 SECURITY
+// DEFINER rls_* functions, so an id-only handler (no organization_id in the
+// request) can scope RLS without trusting caller input. Satisfied by the
+// postgres TenantResolverRepo; declared locally so the interface — not the
+// concrete repo — is the handler's dependency (DI passes the concrete impl).
+type OrgResolver interface {
+	ResolveWorkloadOrg(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	ResolveDecisionOrg(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+}
+
 // AgentServer implements the AugurAgentService gRPC service
 type AgentServer struct {
 	augurv1.UnimplementedAugurAgentServiceServer
@@ -30,6 +40,7 @@ type AgentServer struct {
 	decisionRepo *postgres.DecisionRepository
 	workloadSvc  *usecase.WorkloadService
 	decisionEng  *usecase.DecisionEngine
+	orgResolver  OrgResolver
 
 	// Track connected agents
 	mu     sync.RWMutex
@@ -51,6 +62,7 @@ func NewAgentServer(
 	decisionRepo *postgres.DecisionRepository,
 	workloadSvc *usecase.WorkloadService,
 	decisionEng *usecase.DecisionEngine,
+	orgResolver OrgResolver,
 ) *AgentServer {
 	return &AgentServer{
 		workloadRepo: workloadRepo,
@@ -58,6 +70,7 @@ func NewAgentServer(
 		decisionRepo: decisionRepo,
 		workloadSvc:  workloadSvc,
 		decisionEng:  decisionEng,
+		orgResolver:  orgResolver,
 		agents:       make(map[string]*connectedAgent),
 	}
 }
@@ -123,6 +136,23 @@ func (s *AgentServer) MetricsStream(stream augurv1.AugurAgentService_MetricsStre
 		if report.WorkloadId != "" {
 			wID, err := uuid.Parse(report.WorkloadId)
 			if err == nil {
+				// D-072 RLS: resolve the workload's real org and scope the per-message
+				// ctx before the RLS-forced write. The caller is an x-api-key service
+				// principal, so this is the D-071 job shape (WithSystemOrg) — the
+				// resolver validated the workload's owner, so it is not a spoof. An
+				// unknown workload (uuid.Nil) is logged and skipped so one bad id
+				// never kills the whole stream.
+				org, rerr := s.orgResolver.ResolveWorkloadOrg(stream.Context(), wID)
+				if rerr != nil {
+					logger.Error("Failed to resolve org for workload %s: %v", report.WorkloadId, rerr)
+					continue
+				}
+				if org == uuid.Nil {
+					logger.Warn("Skipping metrics for unknown workload %s", report.WorkloadId)
+					continue
+				}
+				msgCtx := tenant.WithSystemOrg(stream.Context(), org)
+
 				snapshot := &domain.WorkloadMetricsSnapshot{
 					CPUPct:         report.CpuUtilizationPct,
 					MemoryPct:      report.MemoryUtilizationPct,
@@ -133,7 +163,7 @@ func (s *AgentServer) MetricsStream(stream augurv1.AugurAgentService_MetricsStre
 					Timestamp:      time.Now(),
 				}
 
-				if err := s.workloadSvc.UpdateMetrics(stream.Context(), wID, snapshot); err != nil {
+				if err := s.workloadSvc.UpdateMetrics(msgCtx, wID, snapshot); err != nil {
 					logger.Error("Failed to update metrics for workload %s: %v", report.WorkloadId, err)
 				}
 			}
@@ -151,6 +181,25 @@ func (s *AgentServer) ReportOutcome(ctx context.Context, req *augurv1.ScalingOut
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid command_id")
 	}
+
+	// D-072 RLS: the report is keyed by a decision id with no org field, so
+	// resolve the decision's owning org and scope the ctx before the RLS-forced
+	// write. An unknown id (uuid.Nil) yields NotFound so existence never leaks.
+	// If a user principal is present its memberships are the sole authority — a
+	// cross-org hit also collapses to NotFound.
+	org, err := s.orgResolver.ResolveDecisionOrg(ctx, decisionID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "resolve decision org: %v", err)
+	}
+	if org == uuid.Nil {
+		return nil, status.Error(codes.NotFound, "decision not found")
+	}
+	if p, ok := tenant.FromContext(ctx); ok && p.Claims != nil {
+		if err := tenant.AssertOrgOrNotFound(ctx, org, "decision not found"); err != nil {
+			return nil, err
+		}
+	}
+	ctx = tenant.WithActiveOrg(ctx, org)
 
 	outcome := domain.DecisionOutcomeHealthy
 	switch req.Outcome {
@@ -190,6 +239,11 @@ func (s *AgentServer) GetPolicy(ctx context.Context, req *augurv1.GetPolicyReque
 	if err := tenant.AuthorizeOrg(ctx, orgID); err != nil {
 		return nil, err
 	}
+
+	// D-072 RLS: stamp the active org before the RLS-forced policy reads. The
+	// UnaryOrgField interceptor already stamps it from the request's
+	// organization_id field; re-stamping here is harmless and explicit.
+	ctx = tenant.WithActiveOrg(ctx, orgID)
 
 	global, _ := s.policyRepo.FindGlobal(ctx, orgID)
 	app, _ := s.policyRepo.FindByApp(ctx, orgID, req.WorkloadId)

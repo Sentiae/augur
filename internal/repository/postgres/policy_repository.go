@@ -23,7 +23,7 @@ func (r *PolicyRepository) getDB(ctx context.Context) *gorm.DB {
 	if tx := TxFromContext(ctx); tx != nil {
 		return tx
 	}
-	return r.db
+	return r.db.WithContext(ctx)
 }
 
 func (r *PolicyRepository) Create(ctx context.Context, p *domain.AugurPolicy) error {

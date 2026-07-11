@@ -19,6 +19,7 @@ type IdleDetector struct {
 	metricsRepo  *postgres.MetricsRepository
 	costRepo     *postgres.CostRepository
 	publisher    events.EventPublisher
+	orgLister    OrgLister
 }
 
 func NewIdleDetector(
@@ -26,12 +27,14 @@ func NewIdleDetector(
 	metricsRepo *postgres.MetricsRepository,
 	costRepo *postgres.CostRepository,
 	publisher events.EventPublisher,
+	orgLister OrgLister,
 ) *IdleDetector {
 	return &IdleDetector{
 		workloadRepo: workloadRepo,
 		metricsRepo:  metricsRepo,
 		costRepo:     costRepo,
 		publisher:    publisher,
+		orgLister:    orgLister,
 	}
 }
 
@@ -56,15 +59,18 @@ func (d *IdleDetector) Run(ctx context.Context) {
 }
 
 func (d *IdleDetector) scan(ctx context.Context) {
-	workloads, err := d.workloadRepo.FindAllManaged(ctx)
-	if err != nil {
-		logger.Error("Idle detector: failed to fetch workloads: %v", err)
-		return
-	}
+	_ = ForEachOrg(ctx, d.orgLister, func(orgCtx context.Context) error {
+		workloads, err := d.workloadRepo.FindAllManaged(orgCtx)
+		if err != nil {
+			logger.Error("Idle detector: failed to fetch workloads: %v", err)
+			return err
+		}
 
-	for _, w := range workloads {
-		d.checkWorkloadIdle(ctx, w)
-	}
+		for _, w := range workloads {
+			d.checkWorkloadIdle(orgCtx, w)
+		}
+		return nil
+	})
 }
 
 func (d *IdleDetector) checkWorkloadIdle(ctx context.Context, w *domain.Workload) {

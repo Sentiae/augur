@@ -72,6 +72,13 @@ func NewServer(cfg ServerConfig, agentServer *AgentServer) *Server {
 			},
 		},
 	})
+	// D-072 RLS org-field stamping: appended AFTER the auth chain so the
+	// principal is established first. UnaryOrgField reflects a request's
+	// organization_id onto ctx (tenantdb stamps the tenant GUC for RLS-scoped
+	// reads); StreamOrgField is registration symmetry only — the MetricsStream
+	// org is handler-resolved per message.
+	unary = append(unary, tenant.UnaryOrgField())
+	stream = append(stream, tenant.StreamOrgField())
 	grpcSrv := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(unary...),
 		grpc.ChainStreamInterceptor(stream...),

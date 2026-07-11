@@ -9,21 +9,16 @@ import (
 )
 
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
-	orgIDStr := r.URL.Query().Get("organization_id")
-	if orgIDStr == "" {
-		respondWithError(w, http.StatusBadRequest, "organization_id is required")
-		return
-	}
-	orgID, err := uuid.Parse(orgIDStr)
+	orgID, ctx, err := orgFromRequest(r)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "invalid organization_id")
+		respondOrgError(w, err)
 		return
 	}
 
 	severity := r.URL.Query().Get("severity")
 	alertType := r.URL.Query().Get("type")
 
-	alerts, err := s.alertService.ListAlerts(r.Context(), orgID, severity, alertType)
+	alerts, err := s.alertService.ListAlerts(ctx, orgID, severity, alertType)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -38,7 +33,13 @@ func (s *Server) explainDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	decision, err := s.decisionEngine.ExplainDecision(r.Context(), decisionID)
+	ctx, err := s.stampDecisionOrg(r.Context(), decisionID)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
+	decision, err := s.decisionEngine.ExplainDecision(ctx, decisionID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -58,7 +59,13 @@ func (s *Server) listDecisions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	decisions, err := s.decisionEngine.GetRecentDecisions(r.Context(), workloadID, 20)
+	ctx, err := s.stampWorkloadOrg(r.Context(), workloadID)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
+	decisions, err := s.decisionEngine.GetRecentDecisions(ctx, workloadID, 20)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -73,6 +80,12 @@ func (s *Server) getForecast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx, err := s.stampWorkloadOrg(r.Context(), workloadID)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
 	horizonHours := 6
 	if h := r.URL.Query().Get("horizon_hours"); h != "" {
 		if v, err := strconv.Atoi(h); err == nil && v > 0 && v <= 24 {
@@ -80,7 +93,7 @@ func (s *Server) getForecast(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	forecast, err := s.predictionEngine.GetForecast(r.Context(), workloadID, horizonHours)
+	forecast, err := s.predictionEngine.GetForecast(ctx, workloadID, horizonHours)
 	if err != nil {
 		respondWithError(w, http.StatusUnprocessableEntity, err.Error())
 		return

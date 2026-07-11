@@ -19,7 +19,13 @@ func (s *Server) getRightsizingRecommendation(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	rec, err := s.rightsizingEng.GetRecommendation(r.Context(), id)
+	ctx, err := s.stampWorkloadOrg(r.Context(), id)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
+	rec, err := s.rightsizingEng.GetRecommendation(ctx, id)
 	if err != nil {
 		respondWithError(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -28,18 +34,13 @@ func (s *Server) getRightsizingRecommendation(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) getRightsizingRecommendations(w http.ResponseWriter, r *http.Request) {
-	orgIDStr := r.URL.Query().Get("organization_id")
-	if orgIDStr == "" {
-		respondWithError(w, http.StatusBadRequest, "organization_id is required")
-		return
-	}
-	orgID, err := uuid.Parse(orgIDStr)
+	orgID, ctx, err := orgFromRequest(r)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "invalid organization_id")
+		respondOrgError(w, err)
 		return
 	}
 
-	recs, err := s.rightsizingEng.GetRecommendationsForOrg(r.Context(), orgID)
+	recs, err := s.rightsizingEng.GetRecommendationsForOrg(ctx, orgID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -54,7 +55,13 @@ func (s *Server) applyRightsizing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rec, err := s.rightsizingEng.ApplyRecommendation(r.Context(), id)
+	ctx, err := s.stampWorkloadOrg(r.Context(), id)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
+	rec, err := s.rightsizingEng.ApplyRecommendation(ctx, id)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -80,12 +87,18 @@ func (s *Server) enableSpot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx, err := s.stampWorkloadOrg(r.Context(), id)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
 	var input spotInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		input = spotInput{MaxSpotPct: 80, FallbackOnInterrupt: true}
 	}
 
-	if err := s.spotManager.EnableSpot(r.Context(), id, input.MaxSpotPct, input.FallbackOnInterrupt); err != nil {
+	if err := s.spotManager.EnableSpot(ctx, id, input.MaxSpotPct, input.FallbackOnInterrupt); err != nil {
 		handleError(w, err)
 		return
 	}
@@ -102,7 +115,13 @@ func (s *Server) disableSpot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.spotManager.DisableSpot(r.Context(), id); err != nil {
+	ctx, err := s.stampWorkloadOrg(r.Context(), id)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
+	if err := s.spotManager.DisableSpot(ctx, id); err != nil {
 		handleError(w, err)
 		return
 	}
@@ -119,7 +138,13 @@ func (s *Server) getSpotStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, err := s.spotManager.GetSpotStatus(r.Context(), id)
+	ctx, err := s.stampWorkloadOrg(r.Context(), id)
+	if err != nil {
+		respondOrgError(w, err)
+		return
+	}
+
+	status, err := s.spotManager.GetSpotStatus(ctx, id)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -138,7 +163,20 @@ func (s *Server) simulateCapacity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.capacitySim.Simulate(r.Context(), input)
+	// A workload-scoped simulation reads that workload under RLS — resolve+stamp
+	// its owning org (404-safe). A generic simulation (no workload_id) touches no
+	// tenant data, so it runs on the request ctx unstamped.
+	ctx := r.Context()
+	if input.WorkloadID != nil {
+		var err error
+		ctx, err = s.stampWorkloadOrg(r.Context(), *input.WorkloadID)
+		if err != nil {
+			respondOrgError(w, err)
+			return
+		}
+	}
+
+	result, err := s.capacitySim.Simulate(ctx, input)
 	if err != nil {
 		handleError(w, err)
 		return

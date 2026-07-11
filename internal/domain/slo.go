@@ -83,6 +83,7 @@ type SLOBurnRateLog struct {
 	ID                     uuid.UUID `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	WorkloadID             uuid.UUID `json:"workload_id" gorm:"type:uuid;not null;index:idx_burnrate_workload_ts"`
 	SLODefinitionID        uuid.UUID `json:"slo_definition_id" gorm:"type:uuid;not null"`
+	OrganizationID         uuid.UUID `json:"organization_id" gorm:"type:uuid;index:idx_augur_burnrate_org"`
 	BurnRate1h             float64   `json:"burn_rate_1h"`
 	BurnRate6h             float64   `json:"burn_rate_6h"`
 	BurnRate1d             float64   `json:"burn_rate_1d"`

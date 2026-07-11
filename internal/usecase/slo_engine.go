@@ -197,10 +197,15 @@ func (e *SLOEngine) computeErrorBudget(w *domain.Workload, slo *domain.SLODefini
 
 // LogBurnRate persists a burn rate snapshot
 func (e *SLOEngine) LogBurnRate(ctx context.Context, workloadID uuid.UUID, sloDefID uuid.UUID, burnRates domain.BurnRates, budgetPct float64, mode domain.SLOMode) error {
+	def, err := e.sloRepo.FindDefinitionByID(ctx, sloDefID)
+	if err != nil {
+		return err
+	}
 	log := &domain.SLOBurnRateLog{
 		ID:                      uuid.New(),
 		WorkloadID:              workloadID,
 		SLODefinitionID:         sloDefID,
+		OrganizationID:          def.OrganizationID,
 		BurnRate1h:              burnRates.Window1h,
 		BurnRate6h:              burnRates.Window6h,
 		BurnRate1d:              burnRates.Window1d,

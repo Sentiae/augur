@@ -17,6 +17,9 @@ import (
 	"github.com/sentiae/infrastructure-intelligence-service/pkg/config"
 	"github.com/sentiae/infrastructure-intelligence-service/pkg/events"
 	"github.com/sentiae/infrastructure-intelligence-service/pkg/logger"
+	pkgmiddleware "github.com/sentiae/platform-kit/middleware"
+	"github.com/sentiae/platform-kit/tenant"
+	"github.com/sentiae/platform-kit/tenantdb"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
@@ -34,6 +37,15 @@ type Container struct {
 	SLORepo      *postgres.SLORepository
 	CostRepo     *postgres.CostRepository
 	MetricsRepo  *postgres.MetricsRepository
+
+	// TenantResolver resolves owning orgs via the D-072 SECURITY DEFINER rls_*
+	// functions; used as the OrgLister for the cross-org loop sweeps (Model D) and
+	// the by-id OrgResolver for the HTTP/gRPC handlers.
+	TenantResolver *postgres.TenantResolverRepo
+
+	// JWKSValidator validates BFF-forwarded user Bearer tokens for the HTTP auth
+	// middleware (D-073). Nil when RLS enforcement is off and JWKS is unavailable.
+	JWKSValidator pkgmiddleware.TokenValidator
 
 	// Use Cases
 	WorkloadService        *usecase.WorkloadService
@@ -84,6 +96,10 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 
+	if err := c.initAuth(); err != nil {
+		return nil, fmt.Errorf("failed to initialize auth: %w", err)
+	}
+
 	c.initInfrastructure()
 	c.initRepositories()
 	c.initUseCases()
@@ -111,17 +127,57 @@ func (c *Container) initDatabase() error {
 		logLevel = gormlogger.Silent
 	}
 
-	dbCfg := postgres.Config{
-		Host:     c.Config.Database.Postgres.Host,
+	pg := c.Config.Database.Postgres
+
+	// OWNER connection for schema DDL (AutoMigrate + RLS objects) — D-070 role
+	// split. Uses MigrateUser/MigratePassword when set, else falls back to the app
+	// creds so an unsplit deploy connects as the same role as before. Short-lived
+	// and closed immediately after schema setup so no DDL-capable pool lingers.
+	ownerUser, ownerPassword := pg.User, pg.Password
+	if pg.MigrateUser != "" {
+		ownerUser, ownerPassword = pg.MigrateUser, pg.MigratePassword
+	}
+	ownerDB, err := postgres.NewDB(postgres.Config{
+		Host:     pg.Host,
 		Port:     port,
-		User:     c.Config.Database.Postgres.User,
-		Password: c.Config.Database.Postgres.Password,
-		Database: c.Config.Database.Postgres.Database,
-		SSLMode:  c.Config.Database.Postgres.SSLMode,
+		User:     ownerUser,
+		Password: ownerPassword,
+		Database: pg.Database,
+		SSLMode:  pg.SSLMode,
 		LogLevel: logLevel,
+	})
+	if err != nil {
+		return fmt.Errorf("open owner connection: %w", err)
 	}
 
-	db, err := postgres.NewDB(dbCfg)
+	// Auto-migrate domain models on the OWNER connection.
+	if err := postgres.AutoMigrate(ownerDB); err != nil {
+		closeDB(ownerDB)
+		return fmt.Errorf("auto-migration failed: %w", err)
+	}
+
+	// RLS objects (child org denormalization + backfill, tenant_isolation policies,
+	// SECURITY DEFINER org resolvers), flag-gated. Skipped when APP_RLS_STAMP_ENABLED
+	// is off → behavior-neutral shadow (no objects created; app stays superuser).
+	if config.RLSStampEnabled() {
+		if err := postgres.ApplyRLSObjects(ownerDB); err != nil {
+			closeDB(ownerDB)
+			return fmt.Errorf("apply RLS objects: %w", err)
+		}
+		logger.Info("RLS objects applied (policies + org-resolver fns)")
+	}
+	closeDB(ownerDB)
+
+	// APP pool (long-lived). Post-flip these are the NOBYPASSRLS app creds.
+	db, err := postgres.NewDB(postgres.Config{
+		Host:     pg.Host,
+		Port:     port,
+		User:     pg.User,
+		Password: pg.Password,
+		Database: pg.Database,
+		SSLMode:  pg.SSLMode,
+		LogLevel: logLevel,
+	})
 	if err != nil {
 		return err
 	}
@@ -131,19 +187,69 @@ func (c *Container) initDatabase() error {
 	if err != nil {
 		return fmt.Errorf("failed to get sql.DB: %w", err)
 	}
-	sqlDB.SetMaxOpenConns(c.Config.Database.Postgres.Pool.MaxOpenConns)
-	sqlDB.SetMaxIdleConns(c.Config.Database.Postgres.Pool.MaxIdleConns)
-	sqlDB.SetConnMaxLifetime(c.Config.Database.Postgres.Pool.MaxLifetime)
-	sqlDB.SetConnMaxIdleTime(c.Config.Database.Postgres.Pool.MaxIdleTime)
+	sqlDB.SetMaxOpenConns(pg.Pool.MaxOpenConns)
+	sqlDB.SetMaxIdleConns(pg.Pool.MaxIdleConns)
+	sqlDB.SetConnMaxLifetime(pg.Pool.MaxLifetime)
+	sqlDB.SetConnMaxIdleTime(pg.Pool.MaxIdleTime)
 
 	c.DB = db
 
-	// Auto-migrate domain models
-	if err := postgres.AutoMigrate(db); err != nil {
-		return fmt.Errorf("auto-migration failed: %w", err)
+	// P4 RLS read-path enforcement (D-071), flag-gated. Registering the Enforce
+	// plugin auto-stamps every non-tx statement with the acting org (resolved from
+	// the statement's ctx) so bare reads/writes are tenant-scoped; the boot posture
+	// assertion then fails LOUD if enforcement is on while the app pool still
+	// connects as a BYPASSRLS/superuser role (policies exist but every row is
+	// visible — the silent-RLS-off footgun). Registration BEFORE assertion. Flag off
+	// → not registered → behavior-neutral shadow.
+	if config.RLSEnforceEnabled() {
+		if err := db.Use(tenantdb.Enforce()); err != nil {
+			return fmt.Errorf("register RLS enforce plugin: %w", err)
+		}
+		logger.Info("RLS Enforce plugin registered on app pool (read-path enforcement ON)")
+		if err := tenantdb.AssertPosture(db, tenantdb.PostureEnforced); err != nil {
+			return fmt.Errorf("RLS boot posture assertion failed: %w", err)
+		}
+		logger.Info("RLS boot posture verified (app role is RLS-enforced)")
 	}
 
 	logger.Info("Database connected and migrated")
+	return nil
+}
+
+// closeDB closes the underlying *sql.DB of a gorm connection, ignoring errors —
+// used to release the short-lived owner connection after schema setup.
+func closeDB(db *gorm.DB) {
+	if sqlDB, err := db.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
+}
+
+// initAuth builds the JWKS-backed user-token validator used by the HTTP auth
+// middleware (D-073), reusing the same JWKS URL + issuer the gRPC auth chain uses.
+//
+// Fail-boot posture: when RLS enforcement is ON — the live state — a service that
+// silently disables auth reverts to the cross-tenant leak, so an empty
+// APP_AUTH_JWKS_URL or a build failure is fatal. When enforcement is OFF (shadow)
+// an unavailable validator degrades to nil (auth disabled, behavior-neutral).
+func (c *Container) initAuth() error {
+	jwks, err := tenant.NewJWKSValidator(tenant.JWKSConfig{
+		JWKSURL: c.Config.Security.Auth.JWKSURL,
+		Issuer:  c.Config.Security.Auth.JWTIssuer,
+	})
+	if config.RLSEnforceEnabled() {
+		if c.Config.Security.Auth.JWKSURL == "" {
+			return fmt.Errorf("RLS enforcement is on but APP_AUTH_JWKS_URL is empty: refusing to boot without user-JWT validation (D-073)")
+		}
+		if err != nil {
+			return fmt.Errorf("RLS enforcement is on but building the JWKS validator failed: %w (D-073)", err)
+		}
+	} else if err != nil {
+		logger.Warn("JWKS validator unavailable; HTTP JWT auth disabled (RLS enforcement off): %v", err)
+		c.JWKSValidator = nil
+		return nil
+	}
+	logger.Info("HTTP JWT auth enabled via JWKS (issuer: %s)", c.Config.Security.Auth.JWTIssuer)
+	c.JWKSValidator = jwks
 	return nil
 }
 
@@ -197,6 +303,11 @@ func (c *Container) initRepositories() {
 	c.SLORepo = postgres.NewSLORepository(c.DB)
 	c.CostRepo = postgres.NewCostRepository(c.DB)
 	c.MetricsRepo = postgres.NewMetricsRepository(c.DB)
+
+	// Org resolver (D-072) — built on the app pool; the OrgLister for the loop
+	// sweeps and the OrgResolver for the HTTP/gRPC by-id handlers. Constructed
+	// BEFORE initUseCases so the loop constructors receive it.
+	c.TenantResolver = postgres.NewTenantResolverRepo(c.DB)
 }
 
 // initUseCases creates all use case instances with injected dependencies
@@ -215,6 +326,7 @@ func (c *Container) initUseCases() {
 		c.PolicyRepo,
 		c.AlertRepo,
 		c.EventPublisher,
+		c.TenantResolver,
 		c.Config.Engine.DecisionIntervalSec,
 		c.Config.Engine.MaxActionsPerHour,
 		c.Config.Engine.CooldownScaleUp,
@@ -251,6 +363,7 @@ func (c *Container) initUseCases() {
 		c.WorkloadRepo,
 		c.MetricsRepo,
 		c.EventPublisher,
+		c.TenantResolver,
 		c.Config.Engine.RollbackWindowMin,
 	)
 
@@ -263,6 +376,7 @@ func (c *Container) initUseCases() {
 		c.CostRepo,
 		c.WorkloadRepo,
 		c.EventPublisher,
+		c.TenantResolver,
 	)
 
 	c.IdleDetector = usecase.NewIdleDetector(
@@ -270,6 +384,7 @@ func (c *Container) initUseCases() {
 		c.MetricsRepo,
 		c.CostRepo,
 		c.EventPublisher,
+		c.TenantResolver,
 	)
 
 	c.RightsizingEng = usecase.NewRightsizingEngine(
@@ -286,6 +401,7 @@ func (c *Container) initUseCases() {
 		c.WorkloadRepo,
 		c.MetricsRepo,
 		c.EventPublisher,
+		c.TenantResolver,
 	)
 
 	// Wire prediction engine into decision engine for predictive scaling
@@ -296,7 +412,7 @@ func (c *Container) initUseCases() {
 		c.PredictionEngine,
 	)
 
-	c.MetricsCleaner = usecase.NewMetricsCleaner(c.MetricsRepo, 7)
+	c.MetricsCleaner = usecase.NewMetricsCleaner(c.MetricsRepo, c.TenantResolver, 7)
 
 	// Phase 4: Multi-environment intelligence
 	c.MultiLayerDetector = usecase.NewMultiLayerAnomalyDetector(
@@ -341,6 +457,9 @@ func (c *Container) initConsumers() {
 // initHandlers creates HTTP handlers
 func (c *Container) initHandlers() {
 	c.HTTPServer = http.NewServer(
+		c.JWKSValidator,
+		c.Config.Security.Auth.ServiceAPIKey,
+		c.TenantResolver,
 		c.WorkloadService,
 		c.DecisionEngine,
 		c.SLOEngine,
@@ -367,6 +486,7 @@ func (c *Container) initGRPC() {
 		c.DecisionRepo,
 		c.WorkloadService,
 		c.DecisionEngine,
+		c.TenantResolver,
 	)
 
 	if !c.Config.Server.GRPC.Enabled {
@@ -463,7 +583,16 @@ func (c *Container) handleDeployCompleted(ctx context.Context, event events.Clou
 	}
 
 	logger.Info("Deploy completed for environment %s — entering post-deploy observation mode", envID)
-	return c.DeployObserver.OnDeployCompleted(ctx, envID)
+
+	// Model D (D-071): the event carries only environment_id, no org. When RLS
+	// enforcement is ON the app pool is NOBYPASSRLS so a bare sweep sees zero rows;
+	// ForEachOrg re-stamps per org (tenant.WithSystemOrg) so each org's workloads
+	// are observed under its own scope. When enforcement is OFF it runs once on the
+	// original ctx — byte-identical legacy behavior. A single org's failure is
+	// logged and skipped inside ForEachOrg, never aborting the sweep.
+	return usecase.ForEachOrg(ctx, c.TenantResolver, func(orgCtx context.Context) error {
+		return c.DeployObserver.OnDeployCompleted(orgCtx, envID)
+	})
 }
 
 // handleAlertFired handles monitor node alerts from ops-service

@@ -21,6 +21,7 @@ type DecisionEngine struct {
 	policyRepo   *postgres.PolicyRepository
 	alertRepo    *postgres.AlertRepository
 	publisher    events.EventPublisher
+	orgLister    OrgLister
 	celEval      *CELEvaluator
 	predictor    *PredictionEngine
 	interval     time.Duration
@@ -37,6 +38,7 @@ func NewDecisionEngine(
 	policyRepo *postgres.PolicyRepository,
 	alertRepo *postgres.AlertRepository,
 	publisher events.EventPublisher,
+	orgLister OrgLister,
 	intervalSec int,
 	maxPerHour int,
 	cooldownUp time.Duration,
@@ -55,6 +57,7 @@ func NewDecisionEngine(
 		policyRepo:   policyRepo,
 		alertRepo:    alertRepo,
 		publisher:    publisher,
+		orgLister:    orgLister,
 		celEval:      celEval,
 		interval:     time.Duration(intervalSec) * time.Second,
 		maxPerHour:   maxPerHour,
@@ -89,17 +92,20 @@ func (e *DecisionEngine) Run(ctx context.Context) {
 }
 
 func (e *DecisionEngine) tick(ctx context.Context) {
-	workloads, err := e.workloadRepo.FindActive(ctx)
-	if err != nil {
-		logger.Error("Decision engine: failed to fetch active workloads: %v", err)
-		return
-	}
-
-	for _, w := range workloads {
-		if err := e.evaluateWorkload(ctx, w); err != nil {
-			logger.Error("Decision engine: error evaluating workload %s: %v", w.ID, err)
+	_ = ForEachOrg(ctx, e.orgLister, func(orgCtx context.Context) error {
+		workloads, err := e.workloadRepo.FindActive(orgCtx)
+		if err != nil {
+			logger.Error("Decision engine: failed to fetch active workloads: %v", err)
+			return err
 		}
-	}
+
+		for _, w := range workloads {
+			if err := e.evaluateWorkload(orgCtx, w); err != nil {
+				logger.Error("Decision engine: error evaluating workload %s: %v", w.ID, err)
+			}
+		}
+		return nil
+	})
 }
 
 func (e *DecisionEngine) evaluateWorkload(ctx context.Context, w *domain.Workload) error {

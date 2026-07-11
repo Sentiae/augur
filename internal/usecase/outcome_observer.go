@@ -16,6 +16,7 @@ type OutcomeObserver struct {
 	workloadRepo *postgres.WorkloadRepository
 	metricsRepo  *postgres.MetricsRepository
 	publisher    events.EventPublisher
+	orgLister    OrgLister
 	rollbackMin  int
 }
 
@@ -24,6 +25,7 @@ func NewOutcomeObserver(
 	workloadRepo *postgres.WorkloadRepository,
 	metricsRepo *postgres.MetricsRepository,
 	publisher events.EventPublisher,
+	orgLister OrgLister,
 	rollbackMin int,
 ) *OutcomeObserver {
 	return &OutcomeObserver{
@@ -31,6 +33,7 @@ func NewOutcomeObserver(
 		workloadRepo: workloadRepo,
 		metricsRepo:  metricsRepo,
 		publisher:    publisher,
+		orgLister:    orgLister,
 		rollbackMin:  rollbackMin,
 	}
 }
@@ -53,17 +56,20 @@ func (o *OutcomeObserver) Run(ctx context.Context) {
 }
 
 func (o *OutcomeObserver) checkPendingOutcomes(ctx context.Context) {
-	// Find decisions that are still pending and older than the rollback window
-	cutoff := time.Now().Add(-time.Duration(o.rollbackMin) * time.Minute)
-	decisions, err := o.decisionRepo.FindPendingOutcomes(ctx, cutoff)
-	if err != nil {
-		logger.Error("Outcome observer: failed to fetch pending decisions: %v", err)
-		return
-	}
+	_ = ForEachOrg(ctx, o.orgLister, func(orgCtx context.Context) error {
+		// Find decisions that are still pending and older than the rollback window
+		cutoff := time.Now().Add(-time.Duration(o.rollbackMin) * time.Minute)
+		decisions, err := o.decisionRepo.FindPendingOutcomes(orgCtx, cutoff)
+		if err != nil {
+			logger.Error("Outcome observer: failed to fetch pending decisions: %v", err)
+			return err
+		}
 
-	for _, d := range decisions {
-		o.evaluateOutcome(ctx, d)
-	}
+		for _, d := range decisions {
+			o.evaluateOutcome(orgCtx, d)
+		}
+		return nil
+	})
 }
 
 func (o *OutcomeObserver) evaluateOutcome(ctx context.Context, d *domain.ScalingDecision) {

@@ -22,7 +22,7 @@ func (r *ModelRegistryRepo) getDB(ctx context.Context) *gorm.DB {
 	if tx := TxFromContext(ctx); tx != nil {
 		return tx
 	}
-	return r.db
+	return r.db.WithContext(ctx)
 }
 
 func (r *ModelRegistryRepo) Create(ctx context.Context, m *domain.ModelRegistry) error {
