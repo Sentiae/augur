@@ -3,21 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	augurv1 "github.com/sentiae/infrastructure-intelligence-service/gen/proto/augur/v1"
+	"github.com/sentiae/infrastructure-intelligence-service/internal/agent/identity"
 	"github.com/sentiae/infrastructure-intelligence-service/pkg/logger"
 )
 
-// ServerlessMetrics holds metrics collected from serverless platforms
+// ServerlessMetrics holds metrics collected from serverless platforms.
 type ServerlessMetrics struct {
 	Invocations       float64 `json:"invocations_per_sec"`
 	AvgDurationMs     float64 `json:"avg_duration_ms"`
@@ -29,103 +25,71 @@ type ServerlessMetrics struct {
 	MemoryAllocatedMB float64 `json:"memory_allocated_mb"`
 }
 
+var (
+	platform        string
+	metricsEndpoint string
+)
+
 func main() {
 	logger.Init("info")
 	logger.Info("Starting Augur serverless agent...")
 
-	agentID := getEnv("AGENT_ID", fmt.Sprintf("serverless-agent-%s", hostname()))
-	hubAddr := getEnv("HUB_ADDR", "localhost:50059")
-	workloadID := getEnv("WORKLOAD_ID", "")
-	platform := getEnv("PLATFORM", "lambda") // lambda, cloud_run, azure_functions
-	metricsEndpoint := getEnv("METRICS_ENDPOINT", "") // optional custom metrics endpoint
-	intervalSec := 60 // serverless polls less frequently
+	platform = getEnv("PLATFORM", "lambda")             // lambda, cloud_run, azure_functions
+	metricsEndpoint = os.Getenv("METRICS_ENDPOINT")     // optional custom metrics endpoint
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	conn, err := grpc.NewClient(hubAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	cfg, err := identity.RunnerConfigFromEnv("serverless", 60) // serverless polls less frequently
 	if err != nil {
-		logger.Fatal("Failed to connect to hub: %v", err)
+		logger.Fatal("Invalid agent config: %v", err)
 	}
-	defer conn.Close()
+	cfg.Collect = collect
+	cfg.ExecuteScaling = executeScaling
 
-	client := augurv1.NewAgentPlaneServiceClient(conn)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-	regResp, err := client.RegisterAgent(ctx, &augurv1.RegisterAgentRequest{
-		AgentId:     agentID,
-		AgentType:   "serverless",
-		Hostname:    hostname(),
-		WorkloadIds: []string{workloadID},
-		Labels: map[string]string{
-			"platform": platform,
-		},
-	})
-	if err != nil {
-		logger.Fatal("Failed to register: %v", err)
+	if err := identity.NewAgent(cfg).Run(ctx); err != nil {
+		logger.Fatal("Agent exited: %v", err)
 	}
-	if regResp.MetricsIntervalSec > 0 {
-		intervalSec = int(regResp.MetricsIntervalSec)
-	}
+	logger.Info("Serverless agent shut down")
+}
 
-	stream, err := client.MetricsStream(ctx)
-	if err != nil {
-		logger.Fatal("Failed to open metrics stream: %v", err)
+// collect polls the serverless platform and maps its metrics onto each workload.
+func collect(_ context.Context, agentID string, workloadIDs []string) []*augurv1.AgentMetricsReport {
+	metrics := collectServerlessMetrics(platform, metricsEndpoint)
+	memPct := 0.0
+	if metrics.MemoryAllocatedMB > 0 {
+		memPct = (metrics.MemoryUsedMB / metrics.MemoryAllocatedMB) * 100
 	}
 
-	// Receive commands (serverless scaling = adjust concurrency limits)
-	go func() {
-		for {
-			cmd, err := stream.Recv()
-			if err != nil {
-				logger.Error("Stream recv error: %v", err)
-				return
-			}
-			handleServerlessCommand(ctx, client, cmd, platform)
-		}
-	}()
+	reports := make([]*augurv1.AgentMetricsReport, 0, len(workloadIDs))
+	for _, wID := range workloadIDs {
+		reports = append(reports, &augurv1.AgentMetricsReport{
+			AgentId:              agentID,
+			WorkloadId:           wID,
+			CpuUtilizationPct:    metrics.ColdStartPct, // cold start pct as CPU proxy
+			MemoryUtilizationPct: memPct,
+			RequestsPerSec:       metrics.Invocations,
+			LatencyP99Ms:         metrics.AvgDurationMs * 1.5, // rough P99 estimate
+			ErrorRatePct:         metrics.ErrorPct,
+			CurrentReplicas:      metrics.ConcurrentExec,
+			QueueDepth:           float64(metrics.ThrottledPct),
+			AgentStatus:          "connected",
+		})
+	}
+	return reports
+}
 
-	// Polling loop: collect metrics from the serverless platform
-	ticker := time.NewTicker(time.Duration(intervalSec) * time.Second)
-	defer ticker.Stop()
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				metrics := collectServerlessMetrics(platform, metricsEndpoint)
-
-				memPct := 0.0
-				if metrics.MemoryAllocatedMB > 0 {
-					memPct = (metrics.MemoryUsedMB / metrics.MemoryAllocatedMB) * 100
-				}
-
-				report := &augurv1.AgentMetricsReport{
-					AgentId:              agentID,
-					WorkloadId:           workloadID,
-					CpuUtilizationPct:    metrics.ColdStartPct, // cold start pct as CPU proxy
-					MemoryUtilizationPct: memPct,
-					RequestsPerSec:       metrics.Invocations,
-					LatencyP99Ms:         metrics.AvgDurationMs * 1.5, // rough P99 estimate
-					ErrorRatePct:         metrics.ErrorPct,
-					CurrentReplicas:      metrics.ConcurrentExec,
-					QueueDepth:           float64(metrics.ThrottledPct),
-					AgentStatus:          "connected",
-				}
-				if err := stream.Send(report); err != nil {
-					logger.Error("Failed to send metrics: %v", err)
-				}
-			}
-		}
-	}()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	logger.Info("Serverless agent shutting down...")
+// executeScaling adjusts reserved concurrency (Lambda) or max instances (Cloud Run).
+func executeScaling(_ context.Context, cmd *augurv1.ScalingCommand) *augurv1.ScalingOutcomeReport {
+	logger.Info("Received command: workload=%s, action=%s, target=%d (platform=%s)",
+		cmd.WorkloadId, cmd.Action, cmd.TargetReplicas, platform)
+	return &augurv1.ScalingOutcomeReport{
+		CommandId:      cmd.CommandId,
+		WorkloadId:     cmd.WorkloadId,
+		Success:        true,
+		Outcome:        "healthy",
+		ActualReplicas: cmd.TargetReplicas,
+	}
 }
 
 func collectServerlessMetrics(platform, endpoint string) ServerlessMetrics {
@@ -133,7 +97,7 @@ func collectServerlessMetrics(platform, endpoint string) ServerlessMetrics {
 		return fetchFromEndpoint(endpoint)
 	}
 
-	// Platform-specific collection stubs
+	// Platform-specific collection stubs.
 	// In production: call CloudWatch (Lambda), Cloud Monitoring (Cloud Run), etc.
 	switch platform {
 	case "lambda":
@@ -146,7 +110,7 @@ func collectServerlessMetrics(platform, endpoint string) ServerlessMetrics {
 }
 
 func collectLambdaMetrics() ServerlessMetrics {
-	// Stub: in production, calls AWS CloudWatch GetMetricData
+	// Stub: in production, calls AWS CloudWatch GetMetricData.
 	return ServerlessMetrics{
 		Invocations:       50,
 		AvgDurationMs:     120,
@@ -160,7 +124,7 @@ func collectLambdaMetrics() ServerlessMetrics {
 }
 
 func collectCloudRunMetrics() ServerlessMetrics {
-	// Stub: in production, calls Cloud Monitoring API
+	// Stub: in production, calls Cloud Monitoring API.
 	return ServerlessMetrics{
 		Invocations:       100,
 		AvgDurationMs:     80,
@@ -182,29 +146,11 @@ func fetchFromEndpoint(endpoint string) ServerlessMetrics {
 	defer resp.Body.Close()
 
 	var metrics ServerlessMetrics
-	json.NewDecoder(resp.Body).Decode(&metrics)
+	if err := json.NewDecoder(resp.Body).Decode(&metrics); err != nil {
+		logger.Error("Failed to decode metrics from %s: %v", endpoint, err)
+		return ServerlessMetrics{}
+	}
 	return metrics
-}
-
-func handleServerlessCommand(ctx context.Context, client augurv1.AgentPlaneServiceClient, cmd *augurv1.ScalingCommand, platform string) {
-	logger.Info("Received command: workload=%s, action=%s, target=%d (platform=%s)",
-		cmd.WorkloadId, cmd.Action, cmd.TargetReplicas, platform)
-
-	// Serverless scaling = adjust reserved concurrency (Lambda) or max instances (Cloud Run)
-	success := true
-
-	_, _ = client.ReportOutcome(ctx, &augurv1.ScalingOutcomeReport{
-		CommandId:      cmd.CommandId,
-		WorkloadId:     cmd.WorkloadId,
-		Success:        success,
-		Outcome:        "healthy",
-		ActualReplicas: cmd.TargetReplicas,
-	})
-}
-
-func hostname() string {
-	h, _ := os.Hostname()
-	return h
 }
 
 func getEnv(key, fallback string) string {
