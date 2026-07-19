@@ -27,6 +27,12 @@ type ServerConfig struct {
 	ServiceAPIKey string
 	JWKSURL       string
 	JWTIssuer     string
+
+	// ControlPlaneOnly registers ONLY the ControlPlaneService on this plaintext
+	// listener. Set true by DI when the agent plane is enabled — the AgentPlane
+	// then lives exclusively on the mTLS listener (D-177). Default false keeps
+	// BOTH services here (byte-identical to today when the plane is disabled).
+	ControlPlaneOnly bool
 }
 
 // Server wraps a google.golang.org/grpc server together with the application's
@@ -84,8 +90,14 @@ func NewServer(cfg ServerConfig, agentServer *AgentServer) *Server {
 		grpc.ChainStreamInterceptor(stream...),
 	)
 
-	// Business service
-	agentServer.RegisterServer(grpcSrv)
+	// Business service. When the agent plane is enabled only the control plane is
+	// served here; the agent plane moves to the mTLS listener (D-177). Otherwise
+	// both services register here (today's single-listener behavior).
+	if cfg.ControlPlaneOnly {
+		agentServer.RegisterControlPlaneOnly(grpcSrv)
+	} else {
+		agentServer.RegisterServer(grpcSrv)
+	}
 
 	// Health service — follows the identity-service golden reference pattern:
 	// register an empty service name for overall health plus the fully

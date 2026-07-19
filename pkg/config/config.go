@@ -31,6 +31,9 @@ type Config struct {
 // the agent plane isn't served until P5, so augur boots unchanged today.
 type AgentPlaneConfig struct {
 	Enabled bool `mapstructure:"enabled"`
+	// Port is the agent-plane mTLS listener port (P5b, D-177). Distinct from the
+	// plaintext control-plane gRPC listener so the two planes bind separately.
+	Port string `mapstructure:"port"`
 	// CertTTL bounds the lifetime of a signed per-agent cert (P4, D-177).
 	CertTTL time.Duration `mapstructure:"cert_ttl"`
 	// Hub server-cert identity (P5a, D-177) — the hub's OWN agent-plane mTLS
@@ -350,6 +353,7 @@ func Load() (*Config, error) {
 
 			// Agent plane (P3+, D-177) — OFF until P5.
 			"agent_plane.enabled":  false,
+			"agent_plane.port":     "50060",
 			"agent_plane.cert_ttl": "24h",
 			// Hub server-cert identity (P5a, D-177) — dev defaults; override per env.
 			"agent_plane.hub_cn":       "augur-hub",
@@ -397,6 +401,7 @@ func Load() (*Config, error) {
 			{"engine.observation_period_days", "APP_ENGINE_OBSERVATION_PERIOD_DAYS"},
 			{"engine.max_actions_per_hour", "APP_ENGINE_MAX_ACTIONS_PER_HOUR"},
 			{"agent_plane.enabled", "APP_AGENT_PLANE_ENABLED"},
+			{"agent_plane.port", "APP_AGENT_PLANE_PORT"},
 			{"agent_plane.cert_ttl", "APP_AGENT_PLANE_CERT_TTL"},
 			{"agent_plane.hub_cn", "APP_AGENT_PLANE_HUB_CN"},
 			{"agent_plane.hub_ip_sans", "APP_AGENT_PLANE_HUB_IP_SANS"},

@@ -33,6 +33,15 @@ type OrgResolver interface {
 	ResolveDecisionOrg(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 }
 
+// AgentFinder loads an enrolled agent by id. The AgentPrincipalInterceptor uses
+// it to cross-check a presented client cert against the enrolled row; the
+// agent-plane data handlers use it to enforce workload bindings. Satisfied by the
+// postgres AgentRepository; declared as an interface so both the interceptor and
+// handler depend on the seam, not the concrete repo.
+type AgentFinder interface {
+	FindAgentByID(ctx context.Context, id uuid.UUID) (*domain.Agent, error)
+}
+
 // AgentServer implements both the AgentPlaneService and ControlPlaneService
 // gRPC services. The two services are split per D-177 (least-privilege: an
 // edge agent's generated client cannot name the control-plane RPCs); one
@@ -50,6 +59,15 @@ type AgentServer struct {
 	decisionEng  *usecase.DecisionEngine
 	orgResolver  OrgResolver
 	enrollment   *usecase.AgentEnrollmentService
+	agentFinder  AgentFinder
+
+	// enforceIdentity gates the P5b cert-derived-identity hardening on the four
+	// agent-plane data RPCs. Set true by DI ONLY when the agent plane is enabled
+	// (the data RPCs are then reachable exclusively over the mTLS listener where
+	// the AgentPrincipalInterceptor injects a principal). Left false when the plane
+	// is disabled so the RPCs behave byte-identically to today on the plaintext
+	// listener (no mTLS interceptor ⇒ no principal to derive from).
+	enforceIdentity bool
 
 	// Track connected agents
 	mu     sync.RWMutex
@@ -73,6 +91,7 @@ func NewAgentServer(
 	decisionEng *usecase.DecisionEngine,
 	orgResolver OrgResolver,
 	enrollment *usecase.AgentEnrollmentService,
+	agentFinder AgentFinder,
 ) *AgentServer {
 	return &AgentServer{
 		workloadRepo: workloadRepo,
@@ -82,16 +101,31 @@ func NewAgentServer(
 		decisionEng:  decisionEng,
 		orgResolver:  orgResolver,
 		enrollment:   enrollment,
+		agentFinder:  agentFinder,
 		agents:       make(map[string]*connectedAgent),
 	}
 }
 
-// RegisterServer registers both gRPC services with a gRPC server. Per D-177
-// the agent plane and control plane are distinct services; P5 will split
-// them onto separate listeners with different TLS, but for now both register
-// on the single provided server so the service keeps working.
+// EnableIdentityEnforcement turns on the P5b cert-derived-identity hardening. DI
+// calls it only when the agent plane is enabled, so the four data RPCs enforce
+// the mTLS principal (org + workload bindings) and fail closed on its absence.
+func (s *AgentServer) EnableIdentityEnforcement() {
+	s.enforceIdentity = true
+}
+
+// RegisterServer registers BOTH gRPC services on one listener. Used only when the
+// agent plane is DISABLED (byte-identical to today: both planes on the plaintext
+// listener). When the plane is enabled DI splits them — RegisterControlPlaneOnly
+// on the plaintext listener, the agent plane on the mTLS listener (D-177).
 func (s *AgentServer) RegisterServer(srv *grpc.Server) {
 	augurv1.RegisterAgentPlaneServiceServer(srv, s)
+	augurv1.RegisterControlPlaneServiceServer(srv, s)
+}
+
+// RegisterControlPlaneOnly registers ONLY the ControlPlaneService. Used on the
+// plaintext listener when the agent plane is enabled, so an agent (which reaches
+// only the mTLS listener) can never name a control-plane RPC (D-177).
+func (s *AgentServer) RegisterControlPlaneOnly(srv *grpc.Server) {
 	augurv1.RegisterControlPlaneServiceServer(srv, s)
 }
 
@@ -204,24 +238,59 @@ func enrollErrToStatus(err error) error {
 	}
 }
 
-// RegisterAgent handles edge agent registration
+// requirePrincipal resolves the mTLS agent identity for the four data RPCs. When
+// identity enforcement is OFF (agent plane disabled) it returns enforce=false and
+// callers keep today's behavior. When ON, it fails closed: a missing principal
+// (Unauthenticated — never happens on the mTLS listener, defense in depth) or an
+// agent-row lookup failure aborts before any data access. On success it returns
+// the cert-derived principal AND the enrolled agent row (for workload-binding
+// checks), so handlers trust the CERT, not the request.
+func (s *AgentServer) requirePrincipal(ctx context.Context) (enforce bool, p agentprincipal.Principal, agent *domain.Agent, err error) {
+	if !s.enforceIdentity {
+		return false, agentprincipal.Principal{}, nil, nil
+	}
+	pr, ok := agentprincipal.PrincipalFromContext(ctx)
+	if !ok {
+		return true, agentprincipal.Principal{}, nil, status.Error(codes.Unauthenticated, "no authenticated agent principal")
+	}
+	a, ferr := s.agentFinder.FindAgentByID(tenant.WithSystemContext(ctx), pr.AgentID)
+	if ferr != nil {
+		return true, pr, nil, status.Error(codes.Unauthenticated, "agent not found")
+	}
+	return true, pr, a, nil
+}
+
+// RegisterAgent handles edge agent registration. Under identity enforcement the
+// connected-agent map is keyed on the AUTHENTICATED agent id (from the cert), not
+// the request's agent_id — killing impersonation. The request's agent_id /
+// workload_ids are then advisory only.
 func (s *AgentServer) RegisterAgent(ctx context.Context, req *augurv1.RegisterAgentRequest) (*augurv1.RegisterAgentResponse, error) {
-	if req.AgentId == "" {
+	enforce, p, agent, err := s.requirePrincipal(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	agentKey := req.AgentId
+	workloads := req.WorkloadIds
+	if enforce {
+		agentKey = p.AgentID.String()
+		workloads = []string(agent.WorkloadBindings)
+	} else if agentKey == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
 
 	s.mu.Lock()
-	s.agents[req.AgentId] = &connectedAgent{
-		agentID:   req.AgentId,
+	s.agents[agentKey] = &connectedAgent{
+		agentID:   agentKey,
 		agentType: req.AgentType,
 		hostname:  req.Hostname,
 		lastSeen:  time.Now(),
-		workloads: req.WorkloadIds,
+		workloads: workloads,
 	}
 	s.mu.Unlock()
 
 	logger.Info("Edge agent registered: id=%s, type=%s, host=%s, workloads=%d",
-		req.AgentId, req.AgentType, req.Hostname, len(req.WorkloadIds))
+		agentKey, req.AgentType, req.Hostname, len(workloads))
 
 	return &augurv1.RegisterAgentResponse{
 		Success:            true,
@@ -233,7 +302,17 @@ func (s *AgentServer) RegisterAgent(ctx context.Context, req *augurv1.RegisterAg
 
 // MetricsStream handles bidirectional streaming between edge agents and control plane
 func (s *AgentServer) MetricsStream(stream augurv1.AgentPlaneService_MetricsStreamServer) error {
+	// Resolve the mTLS identity ONCE per connection (bindings don't change
+	// mid-stream; a revoke is enforced at the next connect by the interceptor).
+	enforce, p, agent, perr := s.requirePrincipal(stream.Context())
+	if perr != nil {
+		return perr
+	}
+
 	var agentID string
+	if enforce {
+		agentID = p.AgentID.String()
+	}
 
 	for {
 		report, err := stream.Recv()
@@ -246,13 +325,16 @@ func (s *AgentServer) MetricsStream(stream augurv1.AgentPlaneService_MetricsStre
 			return err
 		}
 
-		agentID = report.AgentId
+		if !enforce {
+			// Legacy path: trust the report's agent id for the connection map key.
+			agentID = report.AgentId
+		}
 
 		// Update agent last seen
 		s.mu.Lock()
-		if agent, ok := s.agents[agentID]; ok {
-			agent.lastSeen = time.Now()
-			agent.stream = stream
+		if a, ok := s.agents[agentID]; ok {
+			a.lastSeen = time.Now()
+			a.stream = stream
 		}
 		s.mu.Unlock()
 
@@ -273,6 +355,13 @@ func (s *AgentServer) MetricsStream(stream augurv1.AgentPlaneService_MetricsStre
 				}
 				if org == uuid.Nil {
 					logger.Warn("Skipping metrics for unknown workload %s", report.WorkloadId)
+					continue
+				}
+				if enforce && (org != p.OrgID || !agent.HasWorkload(report.WorkloadId)) {
+					// Cross-tenant or unbound workload: drop silently (no existence
+					// leak) — one report never crosses the agent's cert-scoped org +
+					// bindings.
+					logger.Warn("agent-plane: dropping metrics for workload %s not owned/bound by agent %s", report.WorkloadId, agentID)
 					continue
 				}
 				msgCtx := tenant.WithSystemOrg(stream.Context(), org)
@@ -301,6 +390,11 @@ func (s *AgentServer) ReportOutcome(ctx context.Context, req *augurv1.ScalingOut
 		return nil, status.Error(codes.InvalidArgument, "command_id is required")
 	}
 
+	enforce, p, agent, perr := s.requirePrincipal(ctx)
+	if perr != nil {
+		return nil, perr
+	}
+
 	decisionID, err := uuid.Parse(req.CommandId)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid command_id")
@@ -318,7 +412,16 @@ func (s *AgentServer) ReportOutcome(ctx context.Context, req *augurv1.ScalingOut
 	if org == uuid.Nil {
 		return nil, status.Error(codes.NotFound, "decision not found")
 	}
-	if p, ok := tenant.FromContext(ctx); ok && p.Claims != nil {
+	if enforce {
+		// The resolved decision org must match the agent's cert org, and (when the
+		// report names a workload) the agent must be bound to it. A mismatch
+		// collapses to NotFound so a cross-tenant probe never learns the decision
+		// exists.
+		if org != p.OrgID || (req.WorkloadId != "" && !agent.HasWorkload(req.WorkloadId)) {
+			logger.Warn("agent-plane: dropping outcome for decision %s not owned/bound by agent %s", req.CommandId, p.AgentID)
+			return nil, status.Error(codes.NotFound, "decision not found")
+		}
+	} else if pr, ok := tenant.FromContext(ctx); ok && pr.Claims != nil {
 		if err := tenant.AssertOrgOrNotFound(ctx, org, "decision not found"); err != nil {
 			return nil, err
 		}
@@ -356,12 +459,27 @@ func (s *AgentServer) GetPolicy(ctx context.Context, req *augurv1.GetPolicyReque
 		return nil, status.Error(codes.InvalidArgument, "invalid organization_id")
 	}
 
-	// Layer-2 tenant isolation: the client supplies the target org, so verify
-	// the caller may act in it before reading its policies. Service principals
-	// (edge agents authenticated by x-api-key) pass; a user principal must be a
-	// member of orgID.
-	if err := tenant.AuthorizeOrg(ctx, orgID); err != nil {
-		return nil, err
+	enforce, p, agent, perr := s.requirePrincipal(ctx)
+	if perr != nil {
+		return nil, perr
+	}
+
+	if enforce {
+		// The requested org + workload must belong to the authenticated agent —
+		// the cert org, not the request, is the authority. A mismatch collapses to
+		// NotFound so a cross-tenant probe never learns the policy exists.
+		if orgID != p.OrgID || !agent.HasWorkload(req.WorkloadId) {
+			logger.Warn("agent-plane: dropping policy request for org=%s workload=%s not owned/bound by agent %s", req.OrganizationId, req.WorkloadId, p.AgentID)
+			return nil, status.Error(codes.NotFound, "policy not found")
+		}
+	} else {
+		// Layer-2 tenant isolation: the client supplies the target org, so verify
+		// the caller may act in it before reading its policies. Service principals
+		// (edge agents authenticated by x-api-key) pass; a user principal must be a
+		// member of orgID.
+		if err := tenant.AuthorizeOrg(ctx, orgID); err != nil {
+			return nil, err
+		}
 	}
 
 	// D-072 RLS: stamp the active org before the RLS-forced policy reads. The

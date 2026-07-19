@@ -80,6 +80,16 @@ type Container struct {
 	GRPCServer  *grpcHandler.Server
 	AgentServer *grpcHandler.AgentServer
 
+	// AgentPlaneServer is the SECOND gRPC listener (P5b, D-177): strict-mTLS,
+	// serves ONLY the AgentPlaneService, guarded by the AgentPrincipal interceptor.
+	// Nil unless the agent plane is enabled.
+	AgentPlaneServer *grpcHandler.AgentPlaneServer
+
+	// HubTLS supplies the agent-plane listener's server cert + agent-CA pool and
+	// keeps the server cert fresh. Nil unless the agent plane is enabled; Stop()
+	// is called on shutdown.
+	HubTLS *vaultgw.HubTLSProvider
+
 	// Event Publisher
 	EventPublisher events.EventPublisher
 
@@ -118,6 +128,10 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	c.initConsumers()
 	c.initHandlers()
 	c.initGRPC()
+
+	if err := c.initAgentPlaneServer(); err != nil {
+		return nil, fmt.Errorf("failed to initialize agent-plane mTLS server: %w", err)
+	}
 
 	return c, nil
 }
@@ -533,6 +547,7 @@ func (c *Container) initGRPC() {
 		c.DecisionEngine,
 		c.TenantResolver,
 		c.AgentEnrollment,
+		c.AgentRepo,
 	)
 
 	if !c.Config.Server.GRPC.Enabled {
@@ -546,7 +561,57 @@ func (c *Container) initGRPC() {
 		ServiceAPIKey: c.Config.Security.Auth.ServiceAPIKey,
 		JWKSURL:       c.Config.Security.Auth.JWKSURL,
 		JWTIssuer:     c.Config.Security.Auth.JWTIssuer,
+		// When the agent plane is enabled the plaintext listener carries ONLY the
+		// control plane; the agent plane moves to the mTLS listener (D-177).
+		ControlPlaneOnly: c.Config.AgentPlane.Enabled,
 	}, c.AgentServer)
+}
+
+// initAgentPlaneServer wires the SECOND gRPC listener — strict-mTLS, agent-plane
+// only (P5b, D-177). Gated on AgentPlane.Enabled: when off, nothing is built and
+// the AgentPlaneService keeps serving on the plaintext listener exactly as today
+// (byte-identical). When on, it fails closed — a HubTLSProvider that can't obtain
+// its server cert + agent CA aborts boot, because a control plane that can't prove
+// its own identity must not serve. Turning on enforcement flips the AgentServer's
+// data RPCs to trust the cert-derived principal, never the request.
+func (c *Container) initAgentPlaneServer() error {
+	if !c.Config.AgentPlane.Enabled {
+		return nil
+	}
+	if c.PKIClient == nil {
+		// initAgentPlane already fails boot when enabled + PKI build fails; this is
+		// a defensive invariant, not a reachable path.
+		return fmt.Errorf("agent plane enabled but PKI client is nil")
+	}
+
+	ap := c.Config.AgentPlane
+	hubTLS, err := vaultgw.NewHubTLSProvider(context.Background(), c.PKIClient, vaultgw.HubTLSConfig{
+		CommonName: ap.HubCommonName,
+		IPSANs:     ap.HubIPSANs,
+		DNSSANs:    ap.HubDNSSANs,
+		CertTTL:    ap.CertTTL,
+	})
+	if err != nil {
+		return fmt.Errorf("build hub TLS provider: %w", err)
+	}
+	c.HubTLS = hubTLS
+
+	// Cert-derived identity is now the authority on the four data RPCs.
+	c.AgentServer.EnableIdentityEnforcement()
+
+	interceptor := grpcHandler.NewAgentPrincipalInterceptor(c.AgentRepo)
+	c.AgentPlaneServer = grpcHandler.NewAgentPlaneServer(ap.Port, hubTLS.ServerTLSConfig(), c.AgentServer, interceptor)
+	logger.Info("Agent-plane mTLS server wired on port %s (identity enforcement ON, D-177)", ap.Port)
+	return nil
+}
+
+// StartAgentPlane starts the agent-plane mTLS listener. Call in a goroutine —
+// Start blocks until ctx is cancelled or an error occurs. No-op when disabled.
+func (c *Container) StartAgentPlane(ctx context.Context) error {
+	if c.AgentPlaneServer == nil {
+		return nil
+	}
+	return c.AgentPlaneServer.Start(ctx)
 }
 
 // StartGRPC starts the edge-agent gRPC server. Call in a goroutine — Start
@@ -649,6 +714,12 @@ func (c *Container) handleAlertFired(ctx context.Context, event events.CloudEven
 
 // Close cleans up all resources
 func (c *Container) Close() {
+	if c.AgentPlaneServer != nil {
+		c.AgentPlaneServer.GracefulStop()
+	}
+	if c.HubTLS != nil {
+		c.HubTLS.Stop()
+	}
 	if c.PKIClient != nil {
 		if err := c.PKIClient.Close(); err != nil {
 			logger.Warn("PKI client close failed: %v", err)

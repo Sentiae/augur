@@ -64,6 +64,15 @@ func main() {
 		}
 	}()
 
+	// Start the agent-plane mTLS listener (P5b, D-177) in a goroutine. No-op
+	// unless the agent plane is enabled. Shares grpcCtx so it stops with the rest
+	// of the gRPC surface on shutdown.
+	go func() {
+		if err := container.StartAgentPlane(grpcCtx); err != nil {
+			logger.Error("agent-plane mTLS server error: %v", err)
+		}
+	}()
+
 	// Start Kafka event consumers
 	consumerCtx, consumerCancel := context.WithCancel(context.Background())
 	defer consumerCancel()
@@ -116,6 +125,10 @@ func main() {
 	if container.GRPCServer != nil {
 		logger.Info("Gracefully stopping gRPC server...")
 		container.GRPCServer.GracefulStop()
+	}
+	if container.AgentPlaneServer != nil {
+		logger.Info("Gracefully stopping agent-plane mTLS server...")
+		container.AgentPlaneServer.GracefulStop()
 	}
 	grpcCancel()
 
