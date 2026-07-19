@@ -51,7 +51,7 @@ func main() {
 	}
 	defer conn.Close()
 
-	client := augurv1.NewAugurAgentServiceClient(conn)
+	client := augurv1.NewAgentPlaneServiceClient(conn)
 
 	regResp, err := client.RegisterAgent(ctx, &augurv1.RegisterAgentRequest{
 		AgentId:     agentID,
@@ -186,7 +186,7 @@ func fetchFromEndpoint(endpoint string) ServerlessMetrics {
 	return metrics
 }
 
-func handleServerlessCommand(ctx context.Context, client augurv1.AugurAgentServiceClient, cmd *augurv1.ScalingCommand, platform string) {
+func handleServerlessCommand(ctx context.Context, client augurv1.AgentPlaneServiceClient, cmd *augurv1.ScalingCommand, platform string) {
 	logger.Info("Received command: workload=%s, action=%s, target=%d (platform=%s)",
 		cmd.WorkloadId, cmd.Action, cmd.TargetReplicas, platform)
 

@@ -68,7 +68,7 @@ func TestAgentServer_GetAgentStatus_Unknown(t *testing.T) {
 	t.Cleanup(srv.GracefulStop)
 
 	conn := dial(t, addr)
-	client := augurv1.NewAugurAgentServiceClient(conn)
+	client := augurv1.NewControlPlaneServiceClient(conn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -90,12 +90,16 @@ func TestAgentServer_GetAgentStatus_Registered(t *testing.T) {
 	t.Cleanup(srv.GracefulStop)
 
 	conn := dial(t, addr)
-	client := augurv1.NewAugurAgentServiceClient(conn)
+	// RegisterAgent is an agent-plane RPC, GetAgentStatus a control-plane RPC
+	// (D-177): the split services share the single listener, so use one client
+	// per plane over the same connection.
+	agentClient := augurv1.NewAgentPlaneServiceClient(conn)
+	client := augurv1.NewControlPlaneServiceClient(conn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	if _, err := client.RegisterAgent(ctx, &augurv1.RegisterAgentRequest{
+	if _, err := agentClient.RegisterAgent(ctx, &augurv1.RegisterAgentRequest{
 		AgentId:     "edge-42",
 		AgentType:   "vm",
 		Hostname:    "host-abc",
@@ -126,7 +130,7 @@ func TestAgentServer_GetAgentStatus_RejectsEmpty(t *testing.T) {
 	t.Cleanup(srv.GracefulStop)
 
 	conn := dial(t, addr)
-	client := augurv1.NewAugurAgentServiceClient(conn)
+	client := augurv1.NewControlPlaneServiceClient(conn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -145,7 +149,7 @@ func TestAgentServer_DispatchDeploy_AgentNotConnected(t *testing.T) {
 	t.Cleanup(srv.GracefulStop)
 
 	conn := dial(t, addr)
-	client := augurv1.NewAugurAgentServiceClient(conn)
+	client := augurv1.NewControlPlaneServiceClient(conn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -167,7 +171,7 @@ func TestAgentServer_DispatchDeploy_RequiresArtifact(t *testing.T) {
 	t.Cleanup(srv.GracefulStop)
 
 	conn := dial(t, addr)
-	client := augurv1.NewAugurAgentServiceClient(conn)
+	client := augurv1.NewControlPlaneServiceClient(conn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

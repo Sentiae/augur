@@ -82,7 +82,7 @@ func TestServer_RegisterAgent(t *testing.T) {
 	t.Cleanup(srv.GracefulStop)
 
 	conn := dial(t, addr)
-	client := augurv1.NewAugurAgentServiceClient(conn)
+	client := augurv1.NewAgentPlaneServiceClient(conn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -115,7 +115,7 @@ func TestServer_RegisterAgent_RejectsEmptyID(t *testing.T) {
 	t.Cleanup(srv.GracefulStop)
 
 	conn := dial(t, addr)
-	client := augurv1.NewAugurAgentServiceClient(conn)
+	client := augurv1.NewAgentPlaneServiceClient(conn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -145,15 +145,18 @@ func TestServer_HealthCheck(t *testing.T) {
 		t.Fatalf("expected SERVING, got %s", resp.Status)
 	}
 
-	// Fully-qualified service name health.
-	svcResp, err := client.Check(ctx, &grpc_health_v1.HealthCheckRequest{
-		Service: "augur.v1.AugurAgentService",
-	})
-	if err != nil {
-		t.Fatalf("Health.Check(augur.v1.AugurAgentService): %v", err)
-	}
-	if svcResp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
-		t.Fatalf("expected SERVING for augur service, got %s", svcResp.Status)
+	// Fully-qualified service name health — both split services (D-177) are
+	// registered on the single listener and report SERVING.
+	for _, svc := range []string{"augur.v1.AgentPlaneService", "augur.v1.ControlPlaneService"} {
+		svcResp, err := client.Check(ctx, &grpc_health_v1.HealthCheckRequest{
+			Service: svc,
+		})
+		if err != nil {
+			t.Fatalf("Health.Check(%s): %v", svc, err)
+		}
+		if svcResp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+			t.Fatalf("expected SERVING for %s, got %s", svc, svcResp.Status)
+		}
 	}
 }
 
@@ -162,7 +165,7 @@ func TestServer_GracefulShutdown(t *testing.T) {
 
 	// Hold an open connection so we can confirm GracefulStop drains cleanly.
 	conn := dial(t, addr)
-	client := augurv1.NewAugurAgentServiceClient(conn)
+	client := augurv1.NewAgentPlaneServiceClient(conn)
 
 	// Warm up — confirms the server is accepting RPCs.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

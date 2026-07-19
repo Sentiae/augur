@@ -22,6 +22,234 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// EnrollRequest carries a one-time join token and a CSR for the agent's
+// first certificate. agent_type/hostname describe the enrolling agent.
+type EnrollRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JoinToken     string                 `protobuf:"bytes,1,opt,name=join_token,json=joinToken,proto3" json:"join_token,omitempty"`
+	CsrPem        string                 `protobuf:"bytes,2,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"`
+	AgentType     string                 `protobuf:"bytes,3,opt,name=agent_type,json=agentType,proto3" json:"agent_type,omitempty"`
+	Hostname      string                 `protobuf:"bytes,4,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnrollRequest) Reset() {
+	*x = EnrollRequest{}
+	mi := &file_augur_v1_agent_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnrollRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnrollRequest) ProtoMessage() {}
+
+func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_augur_v1_agent_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnrollRequest.ProtoReflect.Descriptor instead.
+func (*EnrollRequest) Descriptor() ([]byte, []int) {
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *EnrollRequest) GetJoinToken() string {
+	if x != nil {
+		return x.JoinToken
+	}
+	return ""
+}
+
+func (x *EnrollRequest) GetCsrPem() string {
+	if x != nil {
+		return x.CsrPem
+	}
+	return ""
+}
+
+func (x *EnrollRequest) GetAgentType() string {
+	if x != nil {
+		return x.AgentType
+	}
+	return ""
+}
+
+func (x *EnrollRequest) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+type EnrollResponse struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	CertPem            string                 `protobuf:"bytes,1,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
+	CaBundlePem        string                 `protobuf:"bytes,2,opt,name=ca_bundle_pem,json=caBundlePem,proto3" json:"ca_bundle_pem,omitempty"`
+	AgentId            string                 `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	MetricsIntervalSec int32                  `protobuf:"varint,4,opt,name=metrics_interval_sec,json=metricsIntervalSec,proto3" json:"metrics_interval_sec,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *EnrollResponse) Reset() {
+	*x = EnrollResponse{}
+	mi := &file_augur_v1_agent_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnrollResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnrollResponse) ProtoMessage() {}
+
+func (x *EnrollResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_augur_v1_agent_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnrollResponse.ProtoReflect.Descriptor instead.
+func (*EnrollResponse) Descriptor() ([]byte, []int) {
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *EnrollResponse) GetCertPem() string {
+	if x != nil {
+		return x.CertPem
+	}
+	return ""
+}
+
+func (x *EnrollResponse) GetCaBundlePem() string {
+	if x != nil {
+		return x.CaBundlePem
+	}
+	return ""
+}
+
+func (x *EnrollResponse) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *EnrollResponse) GetMetricsIntervalSec() int32 {
+	if x != nil {
+		return x.MetricsIntervalSec
+	}
+	return 0
+}
+
+// RenewRequest carries a fresh CSR for certificate rotation over the
+// already-authenticated agent channel.
+type RenewRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CsrPem        string                 `protobuf:"bytes,1,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RenewRequest) Reset() {
+	*x = RenewRequest{}
+	mi := &file_augur_v1_agent_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RenewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RenewRequest) ProtoMessage() {}
+
+func (x *RenewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_augur_v1_agent_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RenewRequest.ProtoReflect.Descriptor instead.
+func (*RenewRequest) Descriptor() ([]byte, []int) {
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *RenewRequest) GetCsrPem() string {
+	if x != nil {
+		return x.CsrPem
+	}
+	return ""
+}
+
+type RenewResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CertPem       string                 `protobuf:"bytes,1,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RenewResponse) Reset() {
+	*x = RenewResponse{}
+	mi := &file_augur_v1_agent_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RenewResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RenewResponse) ProtoMessage() {}
+
+func (x *RenewResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_augur_v1_agent_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RenewResponse.ProtoReflect.Descriptor instead.
+func (*RenewResponse) Descriptor() ([]byte, []int) {
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *RenewResponse) GetCertPem() string {
+	if x != nil {
+		return x.CertPem
+	}
+	return ""
+}
+
 // AgentMetricsReport is sent by edge agents every 10-60 seconds
 type AgentMetricsReport struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
@@ -45,7 +273,7 @@ type AgentMetricsReport struct {
 
 func (x *AgentMetricsReport) Reset() {
 	*x = AgentMetricsReport{}
-	mi := &file_augur_v1_agent_proto_msgTypes[0]
+	mi := &file_augur_v1_agent_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -57,7 +285,7 @@ func (x *AgentMetricsReport) String() string {
 func (*AgentMetricsReport) ProtoMessage() {}
 
 func (x *AgentMetricsReport) ProtoReflect() protoreflect.Message {
-	mi := &file_augur_v1_agent_proto_msgTypes[0]
+	mi := &file_augur_v1_agent_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -70,7 +298,7 @@ func (x *AgentMetricsReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMetricsReport.ProtoReflect.Descriptor instead.
 func (*AgentMetricsReport) Descriptor() ([]byte, []int) {
-	return file_augur_v1_agent_proto_rawDescGZIP(), []int{0}
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *AgentMetricsReport) GetAgentId() string {
@@ -181,7 +409,7 @@ type ScalingCommand struct {
 
 func (x *ScalingCommand) Reset() {
 	*x = ScalingCommand{}
-	mi := &file_augur_v1_agent_proto_msgTypes[1]
+	mi := &file_augur_v1_agent_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -193,7 +421,7 @@ func (x *ScalingCommand) String() string {
 func (*ScalingCommand) ProtoMessage() {}
 
 func (x *ScalingCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_augur_v1_agent_proto_msgTypes[1]
+	mi := &file_augur_v1_agent_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -206,7 +434,7 @@ func (x *ScalingCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScalingCommand.ProtoReflect.Descriptor instead.
 func (*ScalingCommand) Descriptor() ([]byte, []int) {
-	return file_augur_v1_agent_proto_rawDescGZIP(), []int{1}
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ScalingCommand) GetCommandId() string {
@@ -309,7 +537,7 @@ type RegisterAgentRequest struct {
 
 func (x *RegisterAgentRequest) Reset() {
 	*x = RegisterAgentRequest{}
-	mi := &file_augur_v1_agent_proto_msgTypes[2]
+	mi := &file_augur_v1_agent_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -321,7 +549,7 @@ func (x *RegisterAgentRequest) String() string {
 func (*RegisterAgentRequest) ProtoMessage() {}
 
 func (x *RegisterAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_augur_v1_agent_proto_msgTypes[2]
+	mi := &file_augur_v1_agent_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -334,7 +562,7 @@ func (x *RegisterAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterAgentRequest.ProtoReflect.Descriptor instead.
 func (*RegisterAgentRequest) Descriptor() ([]byte, []int) {
-	return file_augur_v1_agent_proto_rawDescGZIP(), []int{2}
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RegisterAgentRequest) GetAgentId() string {
@@ -398,7 +626,7 @@ type RegisterAgentResponse struct {
 
 func (x *RegisterAgentResponse) Reset() {
 	*x = RegisterAgentResponse{}
-	mi := &file_augur_v1_agent_proto_msgTypes[3]
+	mi := &file_augur_v1_agent_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -410,7 +638,7 @@ func (x *RegisterAgentResponse) String() string {
 func (*RegisterAgentResponse) ProtoMessage() {}
 
 func (x *RegisterAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_augur_v1_agent_proto_msgTypes[3]
+	mi := &file_augur_v1_agent_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -423,7 +651,7 @@ func (x *RegisterAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterAgentResponse.ProtoReflect.Descriptor instead.
 func (*RegisterAgentResponse) Descriptor() ([]byte, []int) {
-	return file_augur_v1_agent_proto_rawDescGZIP(), []int{3}
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RegisterAgentResponse) GetSuccess() bool {
@@ -470,7 +698,7 @@ type ScalingOutcomeReport struct {
 
 func (x *ScalingOutcomeReport) Reset() {
 	*x = ScalingOutcomeReport{}
-	mi := &file_augur_v1_agent_proto_msgTypes[4]
+	mi := &file_augur_v1_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -482,7 +710,7 @@ func (x *ScalingOutcomeReport) String() string {
 func (*ScalingOutcomeReport) ProtoMessage() {}
 
 func (x *ScalingOutcomeReport) ProtoReflect() protoreflect.Message {
-	mi := &file_augur_v1_agent_proto_msgTypes[4]
+	mi := &file_augur_v1_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -495,7 +723,7 @@ func (x *ScalingOutcomeReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScalingOutcomeReport.ProtoReflect.Descriptor instead.
 func (*ScalingOutcomeReport) Descriptor() ([]byte, []int) {
-	return file_augur_v1_agent_proto_rawDescGZIP(), []int{4}
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ScalingOutcomeReport) GetCommandId() string {
@@ -556,7 +784,7 @@ type ScalingOutcomeResponse struct {
 
 func (x *ScalingOutcomeResponse) Reset() {
 	*x = ScalingOutcomeResponse{}
-	mi := &file_augur_v1_agent_proto_msgTypes[5]
+	mi := &file_augur_v1_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -568,7 +796,7 @@ func (x *ScalingOutcomeResponse) String() string {
 func (*ScalingOutcomeResponse) ProtoMessage() {}
 
 func (x *ScalingOutcomeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_augur_v1_agent_proto_msgTypes[5]
+	mi := &file_augur_v1_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -581,7 +809,7 @@ func (x *ScalingOutcomeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScalingOutcomeResponse.ProtoReflect.Descriptor instead.
 func (*ScalingOutcomeResponse) Descriptor() ([]byte, []int) {
-	return file_augur_v1_agent_proto_rawDescGZIP(), []int{5}
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ScalingOutcomeResponse) GetAcknowledged() bool {
@@ -602,7 +830,7 @@ type GetPolicyRequest struct {
 
 func (x *GetPolicyRequest) Reset() {
 	*x = GetPolicyRequest{}
-	mi := &file_augur_v1_agent_proto_msgTypes[6]
+	mi := &file_augur_v1_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -614,7 +842,7 @@ func (x *GetPolicyRequest) String() string {
 func (*GetPolicyRequest) ProtoMessage() {}
 
 func (x *GetPolicyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_augur_v1_agent_proto_msgTypes[6]
+	mi := &file_augur_v1_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -627,7 +855,7 @@ func (x *GetPolicyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPolicyRequest.ProtoReflect.Descriptor instead.
 func (*GetPolicyRequest) Descriptor() ([]byte, []int) {
-	return file_augur_v1_agent_proto_rawDescGZIP(), []int{6}
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetPolicyRequest) GetWorkloadId() string {
@@ -661,7 +889,7 @@ type GetPolicyResponse struct {
 
 func (x *GetPolicyResponse) Reset() {
 	*x = GetPolicyResponse{}
-	mi := &file_augur_v1_agent_proto_msgTypes[7]
+	mi := &file_augur_v1_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -673,7 +901,7 @@ func (x *GetPolicyResponse) String() string {
 func (*GetPolicyResponse) ProtoMessage() {}
 
 func (x *GetPolicyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_augur_v1_agent_proto_msgTypes[7]
+	mi := &file_augur_v1_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -686,7 +914,7 @@ func (x *GetPolicyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPolicyResponse.ProtoReflect.Descriptor instead.
 func (*GetPolicyResponse) Descriptor() ([]byte, []int) {
-	return file_augur_v1_agent_proto_rawDescGZIP(), []int{7}
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetPolicyResponse) GetOptimizationMode() string {
@@ -770,7 +998,7 @@ type DispatchDeployRequest struct {
 
 func (x *DispatchDeployRequest) Reset() {
 	*x = DispatchDeployRequest{}
-	mi := &file_augur_v1_agent_proto_msgTypes[8]
+	mi := &file_augur_v1_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -782,7 +1010,7 @@ func (x *DispatchDeployRequest) String() string {
 func (*DispatchDeployRequest) ProtoMessage() {}
 
 func (x *DispatchDeployRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_augur_v1_agent_proto_msgTypes[8]
+	mi := &file_augur_v1_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -795,7 +1023,7 @@ func (x *DispatchDeployRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DispatchDeployRequest.ProtoReflect.Descriptor instead.
 func (*DispatchDeployRequest) Descriptor() ([]byte, []int) {
-	return file_augur_v1_agent_proto_rawDescGZIP(), []int{8}
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DispatchDeployRequest) GetAgentId() string {
@@ -865,7 +1093,7 @@ type DispatchDeployResponse struct {
 
 func (x *DispatchDeployResponse) Reset() {
 	*x = DispatchDeployResponse{}
-	mi := &file_augur_v1_agent_proto_msgTypes[9]
+	mi := &file_augur_v1_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -877,7 +1105,7 @@ func (x *DispatchDeployResponse) String() string {
 func (*DispatchDeployResponse) ProtoMessage() {}
 
 func (x *DispatchDeployResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_augur_v1_agent_proto_msgTypes[9]
+	mi := &file_augur_v1_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -890,7 +1118,7 @@ func (x *DispatchDeployResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DispatchDeployResponse.ProtoReflect.Descriptor instead.
 func (*DispatchDeployResponse) Descriptor() ([]byte, []int) {
-	return file_augur_v1_agent_proto_rawDescGZIP(), []int{9}
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *DispatchDeployResponse) GetDispatched() bool {
@@ -924,7 +1152,7 @@ type GetAgentStatusRequest struct {
 
 func (x *GetAgentStatusRequest) Reset() {
 	*x = GetAgentStatusRequest{}
-	mi := &file_augur_v1_agent_proto_msgTypes[10]
+	mi := &file_augur_v1_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -936,7 +1164,7 @@ func (x *GetAgentStatusRequest) String() string {
 func (*GetAgentStatusRequest) ProtoMessage() {}
 
 func (x *GetAgentStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_augur_v1_agent_proto_msgTypes[10]
+	mi := &file_augur_v1_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -949,7 +1177,7 @@ func (x *GetAgentStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetAgentStatusRequest) Descriptor() ([]byte, []int) {
-	return file_augur_v1_agent_proto_rawDescGZIP(), []int{10}
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetAgentStatusRequest) GetAgentId() string {
@@ -972,7 +1200,7 @@ type GetAgentStatusResponse struct {
 
 func (x *GetAgentStatusResponse) Reset() {
 	*x = GetAgentStatusResponse{}
-	mi := &file_augur_v1_agent_proto_msgTypes[11]
+	mi := &file_augur_v1_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -984,7 +1212,7 @@ func (x *GetAgentStatusResponse) String() string {
 func (*GetAgentStatusResponse) ProtoMessage() {}
 
 func (x *GetAgentStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_augur_v1_agent_proto_msgTypes[11]
+	mi := &file_augur_v1_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -997,7 +1225,7 @@ func (x *GetAgentStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetAgentStatusResponse) Descriptor() ([]byte, []int) {
-	return file_augur_v1_agent_proto_rawDescGZIP(), []int{11}
+	return file_augur_v1_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GetAgentStatusResponse) GetConnected() bool {
@@ -1039,7 +1267,23 @@ var File_augur_v1_agent_proto protoreflect.FileDescriptor
 
 const file_augur_v1_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x14augur/v1/agent.proto\x12\baugur.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xfa\x03\n" +
+	"\x14augur/v1/agent.proto\x12\baugur.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x82\x01\n" +
+	"\rEnrollRequest\x12\x1d\n" +
+	"\n" +
+	"join_token\x18\x01 \x01(\tR\tjoinToken\x12\x17\n" +
+	"\acsr_pem\x18\x02 \x01(\tR\x06csrPem\x12\x1d\n" +
+	"\n" +
+	"agent_type\x18\x03 \x01(\tR\tagentType\x12\x1a\n" +
+	"\bhostname\x18\x04 \x01(\tR\bhostname\"\x9c\x01\n" +
+	"\x0eEnrollResponse\x12\x19\n" +
+	"\bcert_pem\x18\x01 \x01(\tR\acertPem\x12\"\n" +
+	"\rca_bundle_pem\x18\x02 \x01(\tR\vcaBundlePem\x12\x19\n" +
+	"\bagent_id\x18\x03 \x01(\tR\aagentId\x120\n" +
+	"\x14metrics_interval_sec\x18\x04 \x01(\x05R\x12metricsIntervalSec\"'\n" +
+	"\fRenewRequest\x12\x17\n" +
+	"\acsr_pem\x18\x01 \x01(\tR\x06csrPem\"*\n" +
+	"\rRenewResponse\x12\x19\n" +
+	"\bcert_pem\x18\x01 \x01(\tR\acertPem\"\xfa\x03\n" +
 	"\x12AgentMetricsReport\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1f\n" +
 	"\vworkload_id\x18\x02 \x01(\tR\n" +
@@ -1144,12 +1388,15 @@ const file_augur_v1_agent_proto_rawDesc = "" +
 	"agent_type\x18\x02 \x01(\tR\tagentType\x12\x1a\n" +
 	"\bhostname\x18\x03 \x01(\tR\bhostname\x127\n" +
 	"\tlast_seen\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\blastSeen\x12!\n" +
-	"\fworkload_ids\x18\x05 \x03(\tR\vworkloadIds2\xf5\x03\n" +
-	"\x11AugurAgentService\x12K\n" +
+	"\fworkload_ids\x18\x05 \x03(\tR\vworkloadIds2\xc2\x03\n" +
+	"\x11AgentPlaneService\x12K\n" +
 	"\rMetricsStream\x12\x1c.augur.v1.AgentMetricsReport\x1a\x18.augur.v1.ScalingCommand(\x010\x01\x12P\n" +
 	"\rRegisterAgent\x12\x1e.augur.v1.RegisterAgentRequest\x1a\x1f.augur.v1.RegisterAgentResponse\x12Q\n" +
 	"\rReportOutcome\x12\x1e.augur.v1.ScalingOutcomeReport\x1a .augur.v1.ScalingOutcomeResponse\x12D\n" +
-	"\tGetPolicy\x12\x1a.augur.v1.GetPolicyRequest\x1a\x1b.augur.v1.GetPolicyResponse\x12S\n" +
+	"\tGetPolicy\x12\x1a.augur.v1.GetPolicyRequest\x1a\x1b.augur.v1.GetPolicyResponse\x12;\n" +
+	"\x06Enroll\x12\x17.augur.v1.EnrollRequest\x1a\x18.augur.v1.EnrollResponse\x128\n" +
+	"\x05Renew\x12\x16.augur.v1.RenewRequest\x1a\x17.augur.v1.RenewResponse2\xbf\x01\n" +
+	"\x13ControlPlaneService\x12S\n" +
 	"\x0eDispatchDeploy\x12\x1f.augur.v1.DispatchDeployRequest\x1a .augur.v1.DispatchDeployResponse\x12S\n" +
 	"\x0eGetAgentStatus\x12\x1f.augur.v1.GetAgentStatusRequest\x1a .augur.v1.GetAgentStatusResponseBSZQgithub.com/sentiae/infrastructure-intelligence-service/gen/proto/augur/v1;augurv1b\x06proto3"
 
@@ -1165,43 +1412,51 @@ func file_augur_v1_agent_proto_rawDescGZIP() []byte {
 	return file_augur_v1_agent_proto_rawDescData
 }
 
-var file_augur_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_augur_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_augur_v1_agent_proto_goTypes = []any{
-	(*AgentMetricsReport)(nil),     // 0: augur.v1.AgentMetricsReport
-	(*ScalingCommand)(nil),         // 1: augur.v1.ScalingCommand
-	(*RegisterAgentRequest)(nil),   // 2: augur.v1.RegisterAgentRequest
-	(*RegisterAgentResponse)(nil),  // 3: augur.v1.RegisterAgentResponse
-	(*ScalingOutcomeReport)(nil),   // 4: augur.v1.ScalingOutcomeReport
-	(*ScalingOutcomeResponse)(nil), // 5: augur.v1.ScalingOutcomeResponse
-	(*GetPolicyRequest)(nil),       // 6: augur.v1.GetPolicyRequest
-	(*GetPolicyResponse)(nil),      // 7: augur.v1.GetPolicyResponse
-	(*DispatchDeployRequest)(nil),  // 8: augur.v1.DispatchDeployRequest
-	(*DispatchDeployResponse)(nil), // 9: augur.v1.DispatchDeployResponse
-	(*GetAgentStatusRequest)(nil),  // 10: augur.v1.GetAgentStatusRequest
-	(*GetAgentStatusResponse)(nil), // 11: augur.v1.GetAgentStatusResponse
-	nil,                            // 12: augur.v1.RegisterAgentRequest.LabelsEntry
-	(*timestamppb.Timestamp)(nil),  // 13: google.protobuf.Timestamp
+	(*EnrollRequest)(nil),          // 0: augur.v1.EnrollRequest
+	(*EnrollResponse)(nil),         // 1: augur.v1.EnrollResponse
+	(*RenewRequest)(nil),           // 2: augur.v1.RenewRequest
+	(*RenewResponse)(nil),          // 3: augur.v1.RenewResponse
+	(*AgentMetricsReport)(nil),     // 4: augur.v1.AgentMetricsReport
+	(*ScalingCommand)(nil),         // 5: augur.v1.ScalingCommand
+	(*RegisterAgentRequest)(nil),   // 6: augur.v1.RegisterAgentRequest
+	(*RegisterAgentResponse)(nil),  // 7: augur.v1.RegisterAgentResponse
+	(*ScalingOutcomeReport)(nil),   // 8: augur.v1.ScalingOutcomeReport
+	(*ScalingOutcomeResponse)(nil), // 9: augur.v1.ScalingOutcomeResponse
+	(*GetPolicyRequest)(nil),       // 10: augur.v1.GetPolicyRequest
+	(*GetPolicyResponse)(nil),      // 11: augur.v1.GetPolicyResponse
+	(*DispatchDeployRequest)(nil),  // 12: augur.v1.DispatchDeployRequest
+	(*DispatchDeployResponse)(nil), // 13: augur.v1.DispatchDeployResponse
+	(*GetAgentStatusRequest)(nil),  // 14: augur.v1.GetAgentStatusRequest
+	(*GetAgentStatusResponse)(nil), // 15: augur.v1.GetAgentStatusResponse
+	nil,                            // 16: augur.v1.RegisterAgentRequest.LabelsEntry
+	(*timestamppb.Timestamp)(nil),  // 17: google.protobuf.Timestamp
 }
 var file_augur_v1_agent_proto_depIdxs = []int32{
-	13, // 0: augur.v1.AgentMetricsReport.timestamp:type_name -> google.protobuf.Timestamp
-	13, // 1: augur.v1.ScalingCommand.issued_at:type_name -> google.protobuf.Timestamp
-	12, // 2: augur.v1.RegisterAgentRequest.labels:type_name -> augur.v1.RegisterAgentRequest.LabelsEntry
-	13, // 3: augur.v1.ScalingOutcomeReport.completed_at:type_name -> google.protobuf.Timestamp
-	13, // 4: augur.v1.GetAgentStatusResponse.last_seen:type_name -> google.protobuf.Timestamp
-	0,  // 5: augur.v1.AugurAgentService.MetricsStream:input_type -> augur.v1.AgentMetricsReport
-	2,  // 6: augur.v1.AugurAgentService.RegisterAgent:input_type -> augur.v1.RegisterAgentRequest
-	4,  // 7: augur.v1.AugurAgentService.ReportOutcome:input_type -> augur.v1.ScalingOutcomeReport
-	6,  // 8: augur.v1.AugurAgentService.GetPolicy:input_type -> augur.v1.GetPolicyRequest
-	8,  // 9: augur.v1.AugurAgentService.DispatchDeploy:input_type -> augur.v1.DispatchDeployRequest
-	10, // 10: augur.v1.AugurAgentService.GetAgentStatus:input_type -> augur.v1.GetAgentStatusRequest
-	1,  // 11: augur.v1.AugurAgentService.MetricsStream:output_type -> augur.v1.ScalingCommand
-	3,  // 12: augur.v1.AugurAgentService.RegisterAgent:output_type -> augur.v1.RegisterAgentResponse
-	5,  // 13: augur.v1.AugurAgentService.ReportOutcome:output_type -> augur.v1.ScalingOutcomeResponse
-	7,  // 14: augur.v1.AugurAgentService.GetPolicy:output_type -> augur.v1.GetPolicyResponse
-	9,  // 15: augur.v1.AugurAgentService.DispatchDeploy:output_type -> augur.v1.DispatchDeployResponse
-	11, // 16: augur.v1.AugurAgentService.GetAgentStatus:output_type -> augur.v1.GetAgentStatusResponse
-	11, // [11:17] is the sub-list for method output_type
-	5,  // [5:11] is the sub-list for method input_type
+	17, // 0: augur.v1.AgentMetricsReport.timestamp:type_name -> google.protobuf.Timestamp
+	17, // 1: augur.v1.ScalingCommand.issued_at:type_name -> google.protobuf.Timestamp
+	16, // 2: augur.v1.RegisterAgentRequest.labels:type_name -> augur.v1.RegisterAgentRequest.LabelsEntry
+	17, // 3: augur.v1.ScalingOutcomeReport.completed_at:type_name -> google.protobuf.Timestamp
+	17, // 4: augur.v1.GetAgentStatusResponse.last_seen:type_name -> google.protobuf.Timestamp
+	4,  // 5: augur.v1.AgentPlaneService.MetricsStream:input_type -> augur.v1.AgentMetricsReport
+	6,  // 6: augur.v1.AgentPlaneService.RegisterAgent:input_type -> augur.v1.RegisterAgentRequest
+	8,  // 7: augur.v1.AgentPlaneService.ReportOutcome:input_type -> augur.v1.ScalingOutcomeReport
+	10, // 8: augur.v1.AgentPlaneService.GetPolicy:input_type -> augur.v1.GetPolicyRequest
+	0,  // 9: augur.v1.AgentPlaneService.Enroll:input_type -> augur.v1.EnrollRequest
+	2,  // 10: augur.v1.AgentPlaneService.Renew:input_type -> augur.v1.RenewRequest
+	12, // 11: augur.v1.ControlPlaneService.DispatchDeploy:input_type -> augur.v1.DispatchDeployRequest
+	14, // 12: augur.v1.ControlPlaneService.GetAgentStatus:input_type -> augur.v1.GetAgentStatusRequest
+	5,  // 13: augur.v1.AgentPlaneService.MetricsStream:output_type -> augur.v1.ScalingCommand
+	7,  // 14: augur.v1.AgentPlaneService.RegisterAgent:output_type -> augur.v1.RegisterAgentResponse
+	9,  // 15: augur.v1.AgentPlaneService.ReportOutcome:output_type -> augur.v1.ScalingOutcomeResponse
+	11, // 16: augur.v1.AgentPlaneService.GetPolicy:output_type -> augur.v1.GetPolicyResponse
+	1,  // 17: augur.v1.AgentPlaneService.Enroll:output_type -> augur.v1.EnrollResponse
+	3,  // 18: augur.v1.AgentPlaneService.Renew:output_type -> augur.v1.RenewResponse
+	13, // 19: augur.v1.ControlPlaneService.DispatchDeploy:output_type -> augur.v1.DispatchDeployResponse
+	15, // 20: augur.v1.ControlPlaneService.GetAgentStatus:output_type -> augur.v1.GetAgentStatusResponse
+	13, // [13:21] is the sub-list for method output_type
+	5,  // [5:13] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -1218,9 +1473,9 @@ func file_augur_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_augur_v1_agent_proto_rawDesc), len(file_augur_v1_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   17,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_augur_v1_agent_proto_goTypes,
 		DependencyIndexes: file_augur_v1_agent_proto_depIdxs,

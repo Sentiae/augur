@@ -6,8 +6,10 @@ option go_package = "github.com/sentiae/infrastructure-intelligence-service/gen/
 
 import "google/protobuf/timestamp.proto";
 
-// AugurAgentService handles bidirectional streaming between edge agents and the control plane
-service AugurAgentService {
+// AgentPlaneService holds the RPCs an edge agent calls. Least-privilege
+// (D-177): an agent's generated client cannot even name the control-plane
+// RPCs. In P5 this plane is served on its own listener with mTLS.
+service AgentPlaneService {
   // MetricsStream is a bidirectional stream for edge agents to send metrics and receive scaling commands
   rpc MetricsStream(stream AgentMetricsReport) returns (stream ScalingCommand);
 
@@ -20,6 +22,21 @@ service AugurAgentService {
   // GetPolicy fetches the resolved policy for a workload
   rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
 
+  // Enroll exchanges a one-time join token + CSR for a signed agent
+  // certificate. Called before the agent has any client cert, so this RPC
+  // is reachable under server-auth TLS only (the mTLS wiring lands in P5;
+  // the signing logic lands in P4). P1 defines only the message shapes.
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+
+  // Renew rotates an agent certificate over the already-mTLS'd agent
+  // channel: the caller presents a fresh CSR and receives a new cert.
+  rpc Renew(RenewRequest) returns (RenewResponse);
+}
+
+// ControlPlaneService holds the RPCs platform services call. Kept separate
+// from AgentPlaneService so edge agents never receive a client stub for
+// these methods (D-177). In P5 this plane is served on its own listener.
+service ControlPlaneService {
   // DispatchDeploy asks the control plane to forward a deploy instruction
   // to a specific connected edge agent. Unlike ScalingCommand (which flows
   // as part of the MetricsStream), DispatchDeploy is a unary RPC callers
@@ -31,6 +48,32 @@ service AugurAgentService {
   // connected, plus its last-seen timestamp and workload bindings. B23 —
   // lets callers heartbeat-poll augur without re-establishing a stream.
   rpc GetAgentStatus(GetAgentStatusRequest) returns (GetAgentStatusResponse);
+}
+
+// EnrollRequest carries a one-time join token and a CSR for the agent's
+// first certificate. agent_type/hostname describe the enrolling agent.
+message EnrollRequest {
+  string join_token = 1;
+  string csr_pem = 2;
+  string agent_type = 3;
+  string hostname = 4;
+}
+
+message EnrollResponse {
+  string cert_pem = 1;
+  string ca_bundle_pem = 2;
+  string agent_id = 3;
+  int32 metrics_interval_sec = 4;
+}
+
+// RenewRequest carries a fresh CSR for certificate rotation over the
+// already-authenticated agent channel.
+message RenewRequest {
+  string csr_pem = 1;
+}
+
+message RenewResponse {
+  string cert_pem = 1;
 }
 
 // AgentMetricsReport is sent by edge agents every 10-60 seconds

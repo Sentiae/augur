@@ -31,9 +31,15 @@ type OrgResolver interface {
 	ResolveDecisionOrg(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 }
 
-// AgentServer implements the AugurAgentService gRPC service
+// AgentServer implements both the AgentPlaneService and ControlPlaneService
+// gRPC services. The two services are split per D-177 (least-privilege: an
+// edge agent's generated client cannot name the control-plane RPCs); one
+// handler satisfies both server interfaces. The embedded Unimplemented*
+// servers supply the default Enroll/Renew methods (codes.Unimplemented)
+// until the enrollment logic lands in P4.
 type AgentServer struct {
-	augurv1.UnimplementedAugurAgentServiceServer
+	augurv1.UnimplementedAgentPlaneServiceServer
+	augurv1.UnimplementedControlPlaneServiceServer
 
 	workloadRepo *postgres.WorkloadRepository
 	policyRepo   *postgres.PolicyRepository
@@ -51,7 +57,7 @@ type connectedAgent struct {
 	agentID   string
 	agentType string
 	hostname  string
-	stream    augurv1.AugurAgentService_MetricsStreamServer
+	stream    augurv1.AgentPlaneService_MetricsStreamServer
 	lastSeen  time.Time
 	workloads []string
 }
@@ -75,9 +81,13 @@ func NewAgentServer(
 	}
 }
 
-// RegisterServer registers the gRPC service with a gRPC server
+// RegisterServer registers both gRPC services with a gRPC server. Per D-177
+// the agent plane and control plane are distinct services; P5 will split
+// them onto separate listeners with different TLS, but for now both register
+// on the single provided server so the service keeps working.
 func (s *AgentServer) RegisterServer(srv *grpc.Server) {
-	augurv1.RegisterAugurAgentServiceServer(srv, s)
+	augurv1.RegisterAgentPlaneServiceServer(srv, s)
+	augurv1.RegisterControlPlaneServiceServer(srv, s)
 }
 
 // RegisterAgent handles edge agent registration
@@ -108,7 +118,7 @@ func (s *AgentServer) RegisterAgent(ctx context.Context, req *augurv1.RegisterAg
 }
 
 // MetricsStream handles bidirectional streaming between edge agents and control plane
-func (s *AgentServer) MetricsStream(stream augurv1.AugurAgentService_MetricsStreamServer) error {
+func (s *AgentServer) MetricsStream(stream augurv1.AgentPlaneService_MetricsStreamServer) error {
 	var agentID string
 
 	for {

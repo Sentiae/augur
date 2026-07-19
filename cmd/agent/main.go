@@ -42,7 +42,7 @@ func main() {
 	}
 	defer conn.Close()
 
-	client := augurv1.NewAugurAgentServiceClient(conn)
+	client := augurv1.NewAgentPlaneServiceClient(conn)
 
 	// Register with control plane
 	regResp, err := client.RegisterAgent(ctx, &augurv1.RegisterAgentRequest{
@@ -108,7 +108,7 @@ func main() {
 }
 
 // handleScalingCommand executes a scaling command from the control plane
-func handleScalingCommand(ctx context.Context, client augurv1.AugurAgentServiceClient, cmd *augurv1.ScalingCommand) {
+func handleScalingCommand(ctx context.Context, client augurv1.AgentPlaneServiceClient, cmd *augurv1.ScalingCommand) {
 	logger.Info("Received scaling command: workload=%s, action=%s, target=%d, reason=%s",
 		cmd.WorkloadId, cmd.Action, cmd.TargetReplicas, cmd.Reasoning)
 

@@ -38,7 +38,7 @@ func main() {
 	}
 	defer conn.Close()
 
-	client := augurv1.NewAugurAgentServiceClient(conn)
+	client := augurv1.NewAgentPlaneServiceClient(conn)
 
 	// Register
 	regResp, err := client.RegisterAgent(ctx, &augurv1.RegisterAgentRequest{
@@ -131,7 +131,7 @@ func main() {
 	logger.Info("VM agent shutting down...")
 }
 
-func handleCommand(ctx context.Context, client augurv1.AugurAgentServiceClient, cmd *augurv1.ScalingCommand) {
+func handleCommand(ctx context.Context, client augurv1.AgentPlaneServiceClient, cmd *augurv1.ScalingCommand) {
 	logger.Info("Received command: workload=%s, action=%s, target=%d",
 		cmd.WorkloadId, cmd.Action, cmd.TargetReplicas)
 

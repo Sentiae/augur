@@ -19,20 +19,22 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AugurAgentService_MetricsStream_FullMethodName  = "/augur.v1.AugurAgentService/MetricsStream"
-	AugurAgentService_RegisterAgent_FullMethodName  = "/augur.v1.AugurAgentService/RegisterAgent"
-	AugurAgentService_ReportOutcome_FullMethodName  = "/augur.v1.AugurAgentService/ReportOutcome"
-	AugurAgentService_GetPolicy_FullMethodName      = "/augur.v1.AugurAgentService/GetPolicy"
-	AugurAgentService_DispatchDeploy_FullMethodName = "/augur.v1.AugurAgentService/DispatchDeploy"
-	AugurAgentService_GetAgentStatus_FullMethodName = "/augur.v1.AugurAgentService/GetAgentStatus"
+	AgentPlaneService_MetricsStream_FullMethodName = "/augur.v1.AgentPlaneService/MetricsStream"
+	AgentPlaneService_RegisterAgent_FullMethodName = "/augur.v1.AgentPlaneService/RegisterAgent"
+	AgentPlaneService_ReportOutcome_FullMethodName = "/augur.v1.AgentPlaneService/ReportOutcome"
+	AgentPlaneService_GetPolicy_FullMethodName     = "/augur.v1.AgentPlaneService/GetPolicy"
+	AgentPlaneService_Enroll_FullMethodName        = "/augur.v1.AgentPlaneService/Enroll"
+	AgentPlaneService_Renew_FullMethodName         = "/augur.v1.AgentPlaneService/Renew"
 )
 
-// AugurAgentServiceClient is the client API for AugurAgentService service.
+// AgentPlaneServiceClient is the client API for AgentPlaneService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// AugurAgentService handles bidirectional streaming between edge agents and the control plane
-type AugurAgentServiceClient interface {
+// AgentPlaneService holds the RPCs an edge agent calls. Least-privilege
+// (D-177): an agent's generated client cannot even name the control-plane
+// RPCs. In P5 this plane is served on its own listener with mTLS.
+type AgentPlaneServiceClient interface {
 	// MetricsStream is a bidirectional stream for edge agents to send metrics and receive scaling commands
 	MetricsStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AgentMetricsReport, ScalingCommand], error)
 	// RegisterAgent registers an edge agent with the control plane
@@ -41,6 +43,309 @@ type AugurAgentServiceClient interface {
 	ReportOutcome(ctx context.Context, in *ScalingOutcomeReport, opts ...grpc.CallOption) (*ScalingOutcomeResponse, error)
 	// GetPolicy fetches the resolved policy for a workload
 	GetPolicy(ctx context.Context, in *GetPolicyRequest, opts ...grpc.CallOption) (*GetPolicyResponse, error)
+	// Enroll exchanges a one-time join token + CSR for a signed agent
+	// certificate. Called before the agent has any client cert, so this RPC
+	// is reachable under server-auth TLS only (the mTLS wiring lands in P5;
+	// the signing logic lands in P4). P1 defines only the message shapes.
+	Enroll(ctx context.Context, in *EnrollRequest, opts ...grpc.CallOption) (*EnrollResponse, error)
+	// Renew rotates an agent certificate over the already-mTLS'd agent
+	// channel: the caller presents a fresh CSR and receives a new cert.
+	Renew(ctx context.Context, in *RenewRequest, opts ...grpc.CallOption) (*RenewResponse, error)
+}
+
+type agentPlaneServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewAgentPlaneServiceClient(cc grpc.ClientConnInterface) AgentPlaneServiceClient {
+	return &agentPlaneServiceClient{cc}
+}
+
+func (c *agentPlaneServiceClient) MetricsStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AgentMetricsReport, ScalingCommand], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentPlaneService_ServiceDesc.Streams[0], AgentPlaneService_MetricsStream_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[AgentMetricsReport, ScalingCommand]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentPlaneService_MetricsStreamClient = grpc.BidiStreamingClient[AgentMetricsReport, ScalingCommand]
+
+func (c *agentPlaneServiceClient) RegisterAgent(ctx context.Context, in *RegisterAgentRequest, opts ...grpc.CallOption) (*RegisterAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterAgentResponse)
+	err := c.cc.Invoke(ctx, AgentPlaneService_RegisterAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentPlaneServiceClient) ReportOutcome(ctx context.Context, in *ScalingOutcomeReport, opts ...grpc.CallOption) (*ScalingOutcomeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ScalingOutcomeResponse)
+	err := c.cc.Invoke(ctx, AgentPlaneService_ReportOutcome_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentPlaneServiceClient) GetPolicy(ctx context.Context, in *GetPolicyRequest, opts ...grpc.CallOption) (*GetPolicyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetPolicyResponse)
+	err := c.cc.Invoke(ctx, AgentPlaneService_GetPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentPlaneServiceClient) Enroll(ctx context.Context, in *EnrollRequest, opts ...grpc.CallOption) (*EnrollResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnrollResponse)
+	err := c.cc.Invoke(ctx, AgentPlaneService_Enroll_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentPlaneServiceClient) Renew(ctx context.Context, in *RenewRequest, opts ...grpc.CallOption) (*RenewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RenewResponse)
+	err := c.cc.Invoke(ctx, AgentPlaneService_Renew_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// AgentPlaneServiceServer is the server API for AgentPlaneService service.
+// All implementations must embed UnimplementedAgentPlaneServiceServer
+// for forward compatibility.
+//
+// AgentPlaneService holds the RPCs an edge agent calls. Least-privilege
+// (D-177): an agent's generated client cannot even name the control-plane
+// RPCs. In P5 this plane is served on its own listener with mTLS.
+type AgentPlaneServiceServer interface {
+	// MetricsStream is a bidirectional stream for edge agents to send metrics and receive scaling commands
+	MetricsStream(grpc.BidiStreamingServer[AgentMetricsReport, ScalingCommand]) error
+	// RegisterAgent registers an edge agent with the control plane
+	RegisterAgent(context.Context, *RegisterAgentRequest) (*RegisterAgentResponse, error)
+	// ReportOutcome reports the result of a scaling action back to the control plane
+	ReportOutcome(context.Context, *ScalingOutcomeReport) (*ScalingOutcomeResponse, error)
+	// GetPolicy fetches the resolved policy for a workload
+	GetPolicy(context.Context, *GetPolicyRequest) (*GetPolicyResponse, error)
+	// Enroll exchanges a one-time join token + CSR for a signed agent
+	// certificate. Called before the agent has any client cert, so this RPC
+	// is reachable under server-auth TLS only (the mTLS wiring lands in P5;
+	// the signing logic lands in P4). P1 defines only the message shapes.
+	Enroll(context.Context, *EnrollRequest) (*EnrollResponse, error)
+	// Renew rotates an agent certificate over the already-mTLS'd agent
+	// channel: the caller presents a fresh CSR and receives a new cert.
+	Renew(context.Context, *RenewRequest) (*RenewResponse, error)
+	mustEmbedUnimplementedAgentPlaneServiceServer()
+}
+
+// UnimplementedAgentPlaneServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedAgentPlaneServiceServer struct{}
+
+func (UnimplementedAgentPlaneServiceServer) MetricsStream(grpc.BidiStreamingServer[AgentMetricsReport, ScalingCommand]) error {
+	return status.Error(codes.Unimplemented, "method MetricsStream not implemented")
+}
+func (UnimplementedAgentPlaneServiceServer) RegisterAgent(context.Context, *RegisterAgentRequest) (*RegisterAgentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RegisterAgent not implemented")
+}
+func (UnimplementedAgentPlaneServiceServer) ReportOutcome(context.Context, *ScalingOutcomeReport) (*ScalingOutcomeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportOutcome not implemented")
+}
+func (UnimplementedAgentPlaneServiceServer) GetPolicy(context.Context, *GetPolicyRequest) (*GetPolicyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPolicy not implemented")
+}
+func (UnimplementedAgentPlaneServiceServer) Enroll(context.Context, *EnrollRequest) (*EnrollResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Enroll not implemented")
+}
+func (UnimplementedAgentPlaneServiceServer) Renew(context.Context, *RenewRequest) (*RenewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Renew not implemented")
+}
+func (UnimplementedAgentPlaneServiceServer) mustEmbedUnimplementedAgentPlaneServiceServer() {}
+func (UnimplementedAgentPlaneServiceServer) testEmbeddedByValue()                           {}
+
+// UnsafeAgentPlaneServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to AgentPlaneServiceServer will
+// result in compilation errors.
+type UnsafeAgentPlaneServiceServer interface {
+	mustEmbedUnimplementedAgentPlaneServiceServer()
+}
+
+func RegisterAgentPlaneServiceServer(s grpc.ServiceRegistrar, srv AgentPlaneServiceServer) {
+	// If the following call panics, it indicates UnimplementedAgentPlaneServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&AgentPlaneService_ServiceDesc, srv)
+}
+
+func _AgentPlaneService_MetricsStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AgentPlaneServiceServer).MetricsStream(&grpc.GenericServerStream[AgentMetricsReport, ScalingCommand]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentPlaneService_MetricsStreamServer = grpc.BidiStreamingServer[AgentMetricsReport, ScalingCommand]
+
+func _AgentPlaneService_RegisterAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterAgentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentPlaneServiceServer).RegisterAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentPlaneService_RegisterAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentPlaneServiceServer).RegisterAgent(ctx, req.(*RegisterAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentPlaneService_ReportOutcome_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ScalingOutcomeReport)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentPlaneServiceServer).ReportOutcome(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentPlaneService_ReportOutcome_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentPlaneServiceServer).ReportOutcome(ctx, req.(*ScalingOutcomeReport))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentPlaneService_GetPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentPlaneServiceServer).GetPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentPlaneService_GetPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentPlaneServiceServer).GetPolicy(ctx, req.(*GetPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentPlaneService_Enroll_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnrollRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentPlaneServiceServer).Enroll(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentPlaneService_Enroll_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentPlaneServiceServer).Enroll(ctx, req.(*EnrollRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentPlaneService_Renew_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RenewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentPlaneServiceServer).Renew(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentPlaneService_Renew_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentPlaneServiceServer).Renew(ctx, req.(*RenewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// AgentPlaneService_ServiceDesc is the grpc.ServiceDesc for AgentPlaneService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var AgentPlaneService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "augur.v1.AgentPlaneService",
+	HandlerType: (*AgentPlaneServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "RegisterAgent",
+			Handler:    _AgentPlaneService_RegisterAgent_Handler,
+		},
+		{
+			MethodName: "ReportOutcome",
+			Handler:    _AgentPlaneService_ReportOutcome_Handler,
+		},
+		{
+			MethodName: "GetPolicy",
+			Handler:    _AgentPlaneService_GetPolicy_Handler,
+		},
+		{
+			MethodName: "Enroll",
+			Handler:    _AgentPlaneService_Enroll_Handler,
+		},
+		{
+			MethodName: "Renew",
+			Handler:    _AgentPlaneService_Renew_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "MetricsStream",
+			Handler:       _AgentPlaneService_MetricsStream_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "augur/v1/agent.proto",
+}
+
+const (
+	ControlPlaneService_DispatchDeploy_FullMethodName = "/augur.v1.ControlPlaneService/DispatchDeploy"
+	ControlPlaneService_GetAgentStatus_FullMethodName = "/augur.v1.ControlPlaneService/GetAgentStatus"
+)
+
+// ControlPlaneServiceClient is the client API for ControlPlaneService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ControlPlaneService holds the RPCs platform services call. Kept separate
+// from AgentPlaneService so edge agents never receive a client stub for
+// these methods (D-177). In P5 this plane is served on its own listener.
+type ControlPlaneServiceClient interface {
 	// DispatchDeploy asks the control plane to forward a deploy instruction
 	// to a specific connected edge agent. Unlike ScalingCommand (which flows
 	// as part of the MetricsStream), DispatchDeploy is a unary RPC callers
@@ -53,91 +358,42 @@ type AugurAgentServiceClient interface {
 	GetAgentStatus(ctx context.Context, in *GetAgentStatusRequest, opts ...grpc.CallOption) (*GetAgentStatusResponse, error)
 }
 
-type augurAgentServiceClient struct {
+type controlPlaneServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewAugurAgentServiceClient(cc grpc.ClientConnInterface) AugurAgentServiceClient {
-	return &augurAgentServiceClient{cc}
+func NewControlPlaneServiceClient(cc grpc.ClientConnInterface) ControlPlaneServiceClient {
+	return &controlPlaneServiceClient{cc}
 }
 
-func (c *augurAgentServiceClient) MetricsStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AgentMetricsReport, ScalingCommand], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &AugurAgentService_ServiceDesc.Streams[0], AugurAgentService_MetricsStream_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[AgentMetricsReport, ScalingCommand]{ClientStream: stream}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AugurAgentService_MetricsStreamClient = grpc.BidiStreamingClient[AgentMetricsReport, ScalingCommand]
-
-func (c *augurAgentServiceClient) RegisterAgent(ctx context.Context, in *RegisterAgentRequest, opts ...grpc.CallOption) (*RegisterAgentResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RegisterAgentResponse)
-	err := c.cc.Invoke(ctx, AugurAgentService_RegisterAgent_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *augurAgentServiceClient) ReportOutcome(ctx context.Context, in *ScalingOutcomeReport, opts ...grpc.CallOption) (*ScalingOutcomeResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ScalingOutcomeResponse)
-	err := c.cc.Invoke(ctx, AugurAgentService_ReportOutcome_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *augurAgentServiceClient) GetPolicy(ctx context.Context, in *GetPolicyRequest, opts ...grpc.CallOption) (*GetPolicyResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetPolicyResponse)
-	err := c.cc.Invoke(ctx, AugurAgentService_GetPolicy_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *augurAgentServiceClient) DispatchDeploy(ctx context.Context, in *DispatchDeployRequest, opts ...grpc.CallOption) (*DispatchDeployResponse, error) {
+func (c *controlPlaneServiceClient) DispatchDeploy(ctx context.Context, in *DispatchDeployRequest, opts ...grpc.CallOption) (*DispatchDeployResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DispatchDeployResponse)
-	err := c.cc.Invoke(ctx, AugurAgentService_DispatchDeploy_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ControlPlaneService_DispatchDeploy_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *augurAgentServiceClient) GetAgentStatus(ctx context.Context, in *GetAgentStatusRequest, opts ...grpc.CallOption) (*GetAgentStatusResponse, error) {
+func (c *controlPlaneServiceClient) GetAgentStatus(ctx context.Context, in *GetAgentStatusRequest, opts ...grpc.CallOption) (*GetAgentStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetAgentStatusResponse)
-	err := c.cc.Invoke(ctx, AugurAgentService_GetAgentStatus_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ControlPlaneService_GetAgentStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// AugurAgentServiceServer is the server API for AugurAgentService service.
-// All implementations must embed UnimplementedAugurAgentServiceServer
+// ControlPlaneServiceServer is the server API for ControlPlaneService service.
+// All implementations must embed UnimplementedControlPlaneServiceServer
 // for forward compatibility.
 //
-// AugurAgentService handles bidirectional streaming between edge agents and the control plane
-type AugurAgentServiceServer interface {
-	// MetricsStream is a bidirectional stream for edge agents to send metrics and receive scaling commands
-	MetricsStream(grpc.BidiStreamingServer[AgentMetricsReport, ScalingCommand]) error
-	// RegisterAgent registers an edge agent with the control plane
-	RegisterAgent(context.Context, *RegisterAgentRequest) (*RegisterAgentResponse, error)
-	// ReportOutcome reports the result of a scaling action back to the control plane
-	ReportOutcome(context.Context, *ScalingOutcomeReport) (*ScalingOutcomeResponse, error)
-	// GetPolicy fetches the resolved policy for a workload
-	GetPolicy(context.Context, *GetPolicyRequest) (*GetPolicyResponse, error)
+// ControlPlaneService holds the RPCs platform services call. Kept separate
+// from AgentPlaneService so edge agents never receive a client stub for
+// these methods (D-177). In P5 this plane is served on its own listener.
+type ControlPlaneServiceServer interface {
 	// DispatchDeploy asks the control plane to forward a deploy instruction
 	// to a specific connected edge agent. Unlike ScalingCommand (which flows
 	// as part of the MetricsStream), DispatchDeploy is a unary RPC callers
@@ -148,187 +404,95 @@ type AugurAgentServiceServer interface {
 	// connected, plus its last-seen timestamp and workload bindings. B23 —
 	// lets callers heartbeat-poll augur without re-establishing a stream.
 	GetAgentStatus(context.Context, *GetAgentStatusRequest) (*GetAgentStatusResponse, error)
-	mustEmbedUnimplementedAugurAgentServiceServer()
+	mustEmbedUnimplementedControlPlaneServiceServer()
 }
 
-// UnimplementedAugurAgentServiceServer must be embedded to have
+// UnimplementedControlPlaneServiceServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedAugurAgentServiceServer struct{}
+type UnimplementedControlPlaneServiceServer struct{}
 
-func (UnimplementedAugurAgentServiceServer) MetricsStream(grpc.BidiStreamingServer[AgentMetricsReport, ScalingCommand]) error {
-	return status.Error(codes.Unimplemented, "method MetricsStream not implemented")
-}
-func (UnimplementedAugurAgentServiceServer) RegisterAgent(context.Context, *RegisterAgentRequest) (*RegisterAgentResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method RegisterAgent not implemented")
-}
-func (UnimplementedAugurAgentServiceServer) ReportOutcome(context.Context, *ScalingOutcomeReport) (*ScalingOutcomeResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ReportOutcome not implemented")
-}
-func (UnimplementedAugurAgentServiceServer) GetPolicy(context.Context, *GetPolicyRequest) (*GetPolicyResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetPolicy not implemented")
-}
-func (UnimplementedAugurAgentServiceServer) DispatchDeploy(context.Context, *DispatchDeployRequest) (*DispatchDeployResponse, error) {
+func (UnimplementedControlPlaneServiceServer) DispatchDeploy(context.Context, *DispatchDeployRequest) (*DispatchDeployResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DispatchDeploy not implemented")
 }
-func (UnimplementedAugurAgentServiceServer) GetAgentStatus(context.Context, *GetAgentStatusRequest) (*GetAgentStatusResponse, error) {
+func (UnimplementedControlPlaneServiceServer) GetAgentStatus(context.Context, *GetAgentStatusRequest) (*GetAgentStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAgentStatus not implemented")
 }
-func (UnimplementedAugurAgentServiceServer) mustEmbedUnimplementedAugurAgentServiceServer() {}
-func (UnimplementedAugurAgentServiceServer) testEmbeddedByValue()                           {}
+func (UnimplementedControlPlaneServiceServer) mustEmbedUnimplementedControlPlaneServiceServer() {}
+func (UnimplementedControlPlaneServiceServer) testEmbeddedByValue()                             {}
 
-// UnsafeAugurAgentServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to AugurAgentServiceServer will
+// UnsafeControlPlaneServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ControlPlaneServiceServer will
 // result in compilation errors.
-type UnsafeAugurAgentServiceServer interface {
-	mustEmbedUnimplementedAugurAgentServiceServer()
+type UnsafeControlPlaneServiceServer interface {
+	mustEmbedUnimplementedControlPlaneServiceServer()
 }
 
-func RegisterAugurAgentServiceServer(s grpc.ServiceRegistrar, srv AugurAgentServiceServer) {
-	// If the following call panics, it indicates UnimplementedAugurAgentServiceServer was
+func RegisterControlPlaneServiceServer(s grpc.ServiceRegistrar, srv ControlPlaneServiceServer) {
+	// If the following call panics, it indicates UnimplementedControlPlaneServiceServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&AugurAgentService_ServiceDesc, srv)
+	s.RegisterService(&ControlPlaneService_ServiceDesc, srv)
 }
 
-func _AugurAgentService_MetricsStream_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(AugurAgentServiceServer).MetricsStream(&grpc.GenericServerStream[AgentMetricsReport, ScalingCommand]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AugurAgentService_MetricsStreamServer = grpc.BidiStreamingServer[AgentMetricsReport, ScalingCommand]
-
-func _AugurAgentService_RegisterAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RegisterAgentRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AugurAgentServiceServer).RegisterAgent(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AugurAgentService_RegisterAgent_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AugurAgentServiceServer).RegisterAgent(ctx, req.(*RegisterAgentRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AugurAgentService_ReportOutcome_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ScalingOutcomeReport)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AugurAgentServiceServer).ReportOutcome(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AugurAgentService_ReportOutcome_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AugurAgentServiceServer).ReportOutcome(ctx, req.(*ScalingOutcomeReport))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AugurAgentService_GetPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetPolicyRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AugurAgentServiceServer).GetPolicy(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AugurAgentService_GetPolicy_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AugurAgentServiceServer).GetPolicy(ctx, req.(*GetPolicyRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AugurAgentService_DispatchDeploy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ControlPlaneService_DispatchDeploy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DispatchDeployRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AugurAgentServiceServer).DispatchDeploy(ctx, in)
+		return srv.(ControlPlaneServiceServer).DispatchDeploy(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: AugurAgentService_DispatchDeploy_FullMethodName,
+		FullMethod: ControlPlaneService_DispatchDeploy_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AugurAgentServiceServer).DispatchDeploy(ctx, req.(*DispatchDeployRequest))
+		return srv.(ControlPlaneServiceServer).DispatchDeploy(ctx, req.(*DispatchDeployRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _AugurAgentService_GetAgentStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ControlPlaneService_GetAgentStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetAgentStatusRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AugurAgentServiceServer).GetAgentStatus(ctx, in)
+		return srv.(ControlPlaneServiceServer).GetAgentStatus(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: AugurAgentService_GetAgentStatus_FullMethodName,
+		FullMethod: ControlPlaneService_GetAgentStatus_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AugurAgentServiceServer).GetAgentStatus(ctx, req.(*GetAgentStatusRequest))
+		return srv.(ControlPlaneServiceServer).GetAgentStatus(ctx, req.(*GetAgentStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// AugurAgentService_ServiceDesc is the grpc.ServiceDesc for AugurAgentService service.
+// ControlPlaneService_ServiceDesc is the grpc.ServiceDesc for ControlPlaneService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var AugurAgentService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "augur.v1.AugurAgentService",
-	HandlerType: (*AugurAgentServiceServer)(nil),
+var ControlPlaneService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "augur.v1.ControlPlaneService",
+	HandlerType: (*ControlPlaneServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "RegisterAgent",
-			Handler:    _AugurAgentService_RegisterAgent_Handler,
-		},
-		{
-			MethodName: "ReportOutcome",
-			Handler:    _AugurAgentService_ReportOutcome_Handler,
-		},
-		{
-			MethodName: "GetPolicy",
-			Handler:    _AugurAgentService_GetPolicy_Handler,
-		},
-		{
 			MethodName: "DispatchDeploy",
-			Handler:    _AugurAgentService_DispatchDeploy_Handler,
+			Handler:    _ControlPlaneService_DispatchDeploy_Handler,
 		},
 		{
 			MethodName: "GetAgentStatus",
-			Handler:    _AugurAgentService_GetAgentStatus_Handler,
+			Handler:    _ControlPlaneService_GetAgentStatus_Handler,
 		},
 	},
-	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "MetricsStream",
-			Handler:       _AugurAgentService_MetricsStream_Handler,
-			ServerStreams: true,
-			ClientStreams: true,
-		},
-	},
+	Streams:  []grpc.StreamDesc{},
 	Metadata: "augur/v1/agent.proto",
 }

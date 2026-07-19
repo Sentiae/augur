@@ -53,8 +53,9 @@ func main() {
 
 	// Start gRPC server (edge-agent control plane) in a goroutine. The
 	// server wrapper binds to cfg.Server.GRPC.Host:Port, registers the
-	// AugurAgentService, the standard grpc.health.v1 health service, and
-	// reflection. It respects ctx.Done() for graceful shutdown.
+	// AgentPlaneService + ControlPlaneService, the standard grpc.health.v1
+	// health service, and reflection. It respects ctx.Done() for graceful
+	// shutdown.
 	grpcCtx, grpcCancel := context.WithCancel(context.Background())
 	defer grpcCancel()
 	go func() {

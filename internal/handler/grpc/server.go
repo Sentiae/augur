@@ -95,7 +95,8 @@ func NewServer(cfg ServerConfig, agentServer *AgentServer) *Server {
 	healthSrv := health.NewServer()
 	grpc_health_v1.RegisterHealthServer(grpcSrv, healthSrv)
 	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
-	healthSrv.SetServingStatus("augur.v1.AugurAgentService", grpc_health_v1.HealthCheckResponse_SERVING)
+	healthSrv.SetServingStatus("augur.v1.AgentPlaneService", grpc_health_v1.HealthCheckResponse_SERVING)
+	healthSrv.SetServingStatus("augur.v1.ControlPlaneService", grpc_health_v1.HealthCheckResponse_SERVING)
 
 	// Reflection aids kubectl port-forward + grpcurl debugging in dev.
 	reflection.Register(grpcSrv)
@@ -145,7 +146,8 @@ func (s *Server) Start(ctx context.Context) error {
 		<-ctx.Done()
 		logger.Info("gRPC server context cancelled, triggering graceful stop")
 		s.healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
-		s.healthSrv.SetServingStatus("augur.v1.AugurAgentService", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
+		s.healthSrv.SetServingStatus("augur.v1.AgentPlaneService", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
+		s.healthSrv.SetServingStatus("augur.v1.ControlPlaneService", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
 		s.grpcServer.GracefulStop()
 	}()
 
@@ -162,7 +164,8 @@ func (s *Server) GracefulStop() {
 		return
 	}
 	s.healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
-	s.healthSrv.SetServingStatus("augur.v1.AugurAgentService", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
+	s.healthSrv.SetServingStatus("augur.v1.AgentPlaneService", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
+	s.healthSrv.SetServingStatus("augur.v1.ControlPlaneService", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
 	s.grpcServer.GracefulStop()
 }
 
