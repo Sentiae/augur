@@ -33,6 +33,14 @@ type AgentPlaneConfig struct {
 	Enabled bool `mapstructure:"enabled"`
 	// CertTTL bounds the lifetime of a signed per-agent cert (P4, D-177).
 	CertTTL time.Duration `mapstructure:"cert_ttl"`
+	// Hub server-cert identity (P5a, D-177) — the hub's OWN agent-plane mTLS
+	// listener cert is issued from the pki-agents CA (role augur-hub). These are
+	// the CN / IP SANs / DNS SANs the hub requests at boot; agents validate the
+	// presented server cert against the pki-agents CA, so these must match the
+	// address agents dial. Comma-separated env → []string via the viper slice hook.
+	HubCommonName string   `mapstructure:"hub_cn"`
+	HubIPSANs     []string `mapstructure:"hub_ip_sans"`
+	HubDNSSANs    []string `mapstructure:"hub_dns_sans"`
 }
 
 // AppConfig contains application metadata
@@ -343,6 +351,10 @@ func Load() (*Config, error) {
 			// Agent plane (P3+, D-177) — OFF until P5.
 			"agent_plane.enabled":  false,
 			"agent_plane.cert_ttl": "24h",
+			// Hub server-cert identity (P5a, D-177) — dev defaults; override per env.
+			"agent_plane.hub_cn":       "augur-hub",
+			"agent_plane.hub_ip_sans":  "127.0.0.1",
+			"agent_plane.hub_dns_sans": "localhost",
 		},
 		BindEnvs: [][2]string{
 			{"app.name", "APP_APP_NAME"},
@@ -386,6 +398,9 @@ func Load() (*Config, error) {
 			{"engine.max_actions_per_hour", "APP_ENGINE_MAX_ACTIONS_PER_HOUR"},
 			{"agent_plane.enabled", "APP_AGENT_PLANE_ENABLED"},
 			{"agent_plane.cert_ttl", "APP_AGENT_PLANE_CERT_TTL"},
+			{"agent_plane.hub_cn", "APP_AGENT_PLANE_HUB_CN"},
+			{"agent_plane.hub_ip_sans", "APP_AGENT_PLANE_HUB_IP_SANS"},
+			{"agent_plane.hub_dns_sans", "APP_AGENT_PLANE_HUB_DNS_SANS"},
 		},
 	})
 	if err != nil {

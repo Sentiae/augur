@@ -9,6 +9,8 @@ package vault
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"strings"
 	"time"
@@ -21,6 +23,13 @@ import (
 const (
 	// signPath is the Vault pki-agents mount + augur-agent role sign endpoint.
 	signPath = "pki-agents/sign/augur-agent"
+	// hubIssuePath is the Vault pki-agents mount + augur-hub role issue endpoint
+	// (P5a, D-177). Vault generates the hub's server keypair (issue, not sign) —
+	// the hub's server key is ephemeral/rotating so CSR management buys nothing.
+	hubIssuePath = "pki-agents/issue/augur-hub"
+	// caReadPath returns the pki-agents CA public cert (PEM in `certificate`). The
+	// hub loads it into its listener's ClientCAs pool to verify agent client certs.
+	caReadPath = "pki-agents/cert/ca"
 	// signTimeout bounds each outbound Vault call (CLAUDE.md §27). augur's other
 	// outbound clients carry no circuit breaker, so this matches with a timeout.
 	signTimeout = 5 * time.Second
@@ -67,6 +76,46 @@ func (c *PKIClient) SignAgentCSR(ctx context.Context, csrPEM string, orgID, agen
 		return "", "", fmt.Errorf("pki: sign agent csr returned no data")
 	}
 	return parseSignResponse(sec.Data)
+}
+
+// FetchAgentCA reads the pki-agents CA public cert (PEM). This is the trust pool
+// the hub's agent-plane mTLS listener verifies AGENT client certs against — the
+// same CA that signs those client certs (P3) and the hub's own server cert (P5a).
+// Vault's cert/ca returns PEM in `certificate`; ensurePEM defensively converts a
+// DER body if a future endpoint ever returns raw DER.
+func (c *PKIClient) FetchAgentCA(ctx context.Context) (caPEM string, err error) {
+	callCtx, cancel := context.WithTimeout(ctx, signTimeout)
+	defer cancel()
+
+	sec, err := c.vc.Raw().Logical().ReadWithContext(callCtx, caReadPath)
+	if err != nil {
+		return "", fmt.Errorf("pki: read agent ca: %w", err)
+	}
+	if sec == nil || sec.Data == nil {
+		return "", fmt.Errorf("pki: read agent ca returned no data")
+	}
+	return parseCAResponse(sec.Data)
+}
+
+// IssueHubServerCert issues the hub's agent-plane mTLS SERVER cert from the
+// pki-agents augur-hub role (P5a, D-177). Vault generates the keypair, so this
+// returns the leaf (PEM), its private key (PEM), and the CA chain (PEM). The CN /
+// IP SANs / DNS SANs come from config (AgentPlaneConfig.Hub*); the agents that
+// dial the hub validate the presented cert against the pki-agents CA, so these
+// must match the address agents dial. Identity is passed explicitly to match
+// SignAgentCSR's stateless style.
+func (c *PKIClient) IssueHubServerCert(ctx context.Context, cn string, ipSANs, dnsSANs []string, ttl time.Duration) (certPEM string, keyPEM string, caChainPEM string, err error) {
+	callCtx, cancel := context.WithTimeout(ctx, signTimeout)
+	defer cancel()
+
+	sec, err := c.vc.Raw().Logical().WriteWithContext(callCtx, hubIssuePath, buildHubIssueRequest(cn, ipSANs, dnsSANs, ttl))
+	if err != nil {
+		return "", "", "", fmt.Errorf("pki: issue hub server cert: %w", err)
+	}
+	if sec == nil || sec.Data == nil {
+		return "", "", "", fmt.Errorf("pki: issue hub server cert returned no data")
+	}
+	return parseIssueResponse(sec.Data)
 }
 
 // Close stops the underlying client's lease renewer.
@@ -138,4 +187,67 @@ func toAnySlice(ss []string) []any {
 		out[i] = s
 	}
 	return out
+}
+
+// buildHubIssueRequest is the pure request-map builder for
+// pki-agents/issue/augur-hub. Vault accepts ip_sans / alt_names as
+// comma-separated strings. Split out so it can be table-tested without a live
+// Vault.
+func buildHubIssueRequest(cn string, ipSANs, dnsSANs []string, ttl time.Duration) map[string]any {
+	return map[string]any{
+		"common_name": cn,
+		"ip_sans":     strings.Join(ipSANs, ","),
+		"alt_names":   strings.Join(dnsSANs, ","),
+		"ttl":         ttl.String(),
+		"format":      "pem",
+	}
+}
+
+// parseIssueResponse is the pure response parser for a Vault pki issue result
+// (leaf + generated private key + CA chain). Split out for table-testing.
+func parseIssueResponse(data map[string]any) (certPEM string, keyPEM string, caChainPEM string, err error) {
+	cert, ok := data["certificate"].(string)
+	if !ok || cert == "" {
+		return "", "", "", fmt.Errorf("pki: issue response missing certificate")
+	}
+	key, ok := data["private_key"].(string)
+	if !ok || key == "" {
+		return "", "", "", fmt.Errorf("pki: issue response missing private_key")
+	}
+	chain := extractCAChain(data)
+	if chain == "" {
+		return "", "", "", fmt.Errorf("pki: issue response missing ca_chain/issuing_ca")
+	}
+	return cert, key, chain, nil
+}
+
+// parseCAResponse extracts the CA cert (PEM) from a pki-agents/cert/ca read.
+func parseCAResponse(data map[string]any) (string, error) {
+	cert, ok := data["certificate"].(string)
+	if !ok || cert == "" {
+		return "", fmt.Errorf("pki: agent ca response missing certificate")
+	}
+	return ensurePEM(cert)
+}
+
+// ensurePEM validates that raw is a parseable X.509 certificate and returns it as
+// PEM. Vault's cert/ca returns PEM already; the DER branch is defensive in case a
+// raw-DER endpoint is ever substituted.
+func ensurePEM(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if strings.Contains(trimmed, "BEGIN CERTIFICATE") {
+		block, _ := pem.Decode([]byte(trimmed))
+		if block == nil {
+			return "", fmt.Errorf("pki: agent ca is not decodable PEM")
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			return "", fmt.Errorf("pki: agent ca parse: %w", err)
+		}
+		return trimmed, nil
+	}
+	der := []byte(raw)
+	if _, err := x509.ParseCertificate(der); err != nil {
+		return "", fmt.Errorf("pki: agent ca is neither PEM nor DER: %w", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), nil
 }
