@@ -11,6 +11,7 @@ import (
 	grpcHandler "github.com/sentiae/infrastructure-intelligence-service/internal/handler/grpc"
 	"github.com/sentiae/infrastructure-intelligence-service/internal/handler/http"
 	"github.com/sentiae/infrastructure-intelligence-service/internal/infrastructure/metrics"
+	vaultgw "github.com/sentiae/infrastructure-intelligence-service/internal/infrastructure/vault"
 	"github.com/sentiae/infrastructure-intelligence-service/internal/infrastructure/workclient"
 	"github.com/sentiae/infrastructure-intelligence-service/internal/repository/postgres"
 	"github.com/sentiae/infrastructure-intelligence-service/internal/usecase"
@@ -86,6 +87,11 @@ type Container struct {
 	// Infrastructure clients
 	WorkClient      *workclient.Client
 	MetricsClient   *metrics.VictoriaMetricsClient
+
+	// PKIClient signs short-lived per-agent client certs (P3, D-177). Nil unless
+	// the agent plane is enabled (APP_AGENT_PLANE_ENABLED); a build failure when
+	// enabled is fatal (fail-closed) — see initAgentPlane.
+	PKIClient *vaultgw.PKIClient
 }
 
 // NewContainer creates and initializes a new dependency injection container
@@ -98,6 +104,10 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 
 	if err := c.initAuth(); err != nil {
 		return nil, fmt.Errorf("failed to initialize auth: %w", err)
+	}
+
+	if err := c.initAgentPlane(); err != nil {
+		return nil, fmt.Errorf("failed to initialize agent plane: %w", err)
 	}
 
 	c.initInfrastructure()
@@ -245,6 +255,28 @@ func (c *Container) initAuth() error {
 	}
 	logger.Info("HTTP JWT auth enabled via JWKS (issuer: %s)", c.Config.Security.Auth.JWTIssuer)
 	c.JWKSValidator = jwks
+	return nil
+}
+
+// initAgentPlane builds the Vault-PKI client for the agent identity subsystem
+// (P3, D-177), gated on APP_AGENT_PLANE_ENABLED.
+//
+// Fail-closed posture: when the agent plane is ENABLED, augur cannot sign the
+// per-agent certs that authenticate the agent-plane mTLS listener without this
+// client — a control that can't prove itself must not serve — so a build failure
+// is FATAL. When DISABLED (the default until P5), no Vault client is built and
+// augur boots exactly as before.
+func (c *Container) initAgentPlane() error {
+	if !c.Config.AgentPlane.Enabled {
+		logger.Info("Agent plane disabled (set APP_AGENT_PLANE_ENABLED=true to enable)")
+		return nil
+	}
+	pki, err := vaultgw.NewPKIClient(context.Background())
+	if err != nil {
+		return fmt.Errorf("agent plane enabled but building the Vault-PKI client failed: %w (D-177)", err)
+	}
+	c.PKIClient = pki
+	logger.Info("Agent-plane Vault-PKI client wired (D-177)")
 	return nil
 }
 
@@ -598,6 +630,11 @@ func (c *Container) handleAlertFired(ctx context.Context, event events.CloudEven
 
 // Close cleans up all resources
 func (c *Container) Close() {
+	if c.PKIClient != nil {
+		if err := c.PKIClient.Close(); err != nil {
+			logger.Warn("PKI client close failed: %v", err)
+		}
+	}
 	if c.MetricsClient != nil {
 		c.MetricsClient.Close()
 	}

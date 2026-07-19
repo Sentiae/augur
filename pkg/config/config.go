@@ -22,6 +22,15 @@ type Config struct {
 	Features      FeaturesConfig      `mapstructure:"features"`
 	Observability ObservabilityConfig `mapstructure:"observability"`
 	Engine        EngineConfig        `mapstructure:"engine"`
+	AgentPlane    AgentPlaneConfig    `mapstructure:"agent_plane"`
+}
+
+// AgentPlaneConfig gates the agent identity subsystem (P3+, D-177). When Enabled,
+// the DI container builds the Vault-PKI client at boot and FAILS BOOT if it can't
+// (fail-closed: a control that can't prove itself must not serve). Default false —
+// the agent plane isn't served until P5, so augur boots unchanged today.
+type AgentPlaneConfig struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 // AppConfig contains application metadata
@@ -328,6 +337,9 @@ func Load() (*Config, error) {
 			"engine.circuit_breaker_threshold":  3,
 			"engine.rollback_window_min":        5,
 			"engine.post_deploy_observe_min":    15,
+
+			// Agent plane (P3+, D-177) — OFF until P5.
+			"agent_plane.enabled": false,
 		},
 		BindEnvs: [][2]string{
 			{"app.name", "APP_APP_NAME"},
@@ -369,6 +381,7 @@ func Load() (*Config, error) {
 			{"engine.decision_interval_sec", "APP_ENGINE_DECISION_INTERVAL_SEC"},
 			{"engine.observation_period_days", "APP_ENGINE_OBSERVATION_PERIOD_DAYS"},
 			{"engine.max_actions_per_hour", "APP_ENGINE_MAX_ACTIONS_PER_HOUR"},
+			{"agent_plane.enabled", "APP_AGENT_PLANE_ENABLED"},
 		},
 	})
 	if err != nil {
