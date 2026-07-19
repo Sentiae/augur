@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -16,6 +17,7 @@ import (
 
 	augurv1 "github.com/sentiae/infrastructure-intelligence-service/gen/proto/augur/v1"
 	"github.com/sentiae/infrastructure-intelligence-service/internal/domain"
+	"github.com/sentiae/infrastructure-intelligence-service/internal/handler/grpc/agentprincipal"
 	"github.com/sentiae/infrastructure-intelligence-service/internal/repository/postgres"
 	"github.com/sentiae/infrastructure-intelligence-service/internal/usecase"
 	"github.com/sentiae/infrastructure-intelligence-service/pkg/logger"
@@ -47,6 +49,7 @@ type AgentServer struct {
 	workloadSvc  *usecase.WorkloadService
 	decisionEng  *usecase.DecisionEngine
 	orgResolver  OrgResolver
+	enrollment   *usecase.AgentEnrollmentService
 
 	// Track connected agents
 	mu     sync.RWMutex
@@ -69,6 +72,7 @@ func NewAgentServer(
 	workloadSvc *usecase.WorkloadService,
 	decisionEng *usecase.DecisionEngine,
 	orgResolver OrgResolver,
+	enrollment *usecase.AgentEnrollmentService,
 ) *AgentServer {
 	return &AgentServer{
 		workloadRepo: workloadRepo,
@@ -77,6 +81,7 @@ func NewAgentServer(
 		workloadSvc:  workloadSvc,
 		decisionEng:  decisionEng,
 		orgResolver:  orgResolver,
+		enrollment:   enrollment,
 		agents:       make(map[string]*connectedAgent),
 	}
 }
@@ -88,6 +93,115 @@ func NewAgentServer(
 func (s *AgentServer) RegisterServer(srv *grpc.Server) {
 	augurv1.RegisterAgentPlaneServiceServer(srv, s)
 	augurv1.RegisterControlPlaneServiceServer(srv, s)
+}
+
+// Enroll (AgentPlaneService) exchanges a one-time join token + CSR for a signed
+// agent certificate. Pre-auth: the caller has no client cert yet (mTLS lands in
+// P5), so the enrollment usecase does all lookups under a system ctx and derives
+// the org + agent-id from the AGENT ROW, never from this request.
+func (s *AgentServer) Enroll(ctx context.Context, req *augurv1.EnrollRequest) (*augurv1.EnrollResponse, error) {
+	if req.GetJoinToken() == "" || req.GetCsrPem() == "" {
+		return nil, status.Error(codes.InvalidArgument, "join_token and csr_pem are required")
+	}
+	out, err := s.enrollment.EnrollAgent(ctx, usecase.EnrollAgentInput{
+		RawToken:  req.GetJoinToken(),
+		CSRPEM:    req.GetCsrPem(),
+		AgentType: req.GetAgentType(),
+		Hostname:  req.GetHostname(),
+	})
+	if err != nil {
+		return nil, enrollErrToStatus(err)
+	}
+	return &augurv1.EnrollResponse{
+		CertPem:            out.CertPEM,
+		CaBundlePem:        out.CAChainPEM,
+		AgentId:            out.AgentID.String(),
+		MetricsIntervalSec: out.MetricsIntervalSec,
+	}, nil
+}
+
+// Renew (AgentPlaneService) rotates the calling agent's certificate. The agent
+// id MUST come from the authenticated mTLS AgentPrincipal (P5), NOT the request
+// body (which would be forgeable). Until P5 populates the principal this fails
+// closed with Unauthenticated.
+func (s *AgentServer) Renew(ctx context.Context, req *augurv1.RenewRequest) (*augurv1.RenewResponse, error) {
+	agentID, ok := agentprincipal.AgentIDFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "no authenticated agent principal")
+	}
+	if req.GetCsrPem() == "" {
+		return nil, status.Error(codes.InvalidArgument, "csr_pem is required")
+	}
+	out, err := s.enrollment.RenewAgentCert(ctx, usecase.RenewAgentCertInput{
+		AgentID: agentID,
+		CSRPEM:  req.GetCsrPem(),
+	})
+	if err != nil {
+		return nil, enrollErrToStatus(err)
+	}
+	return &augurv1.RenewResponse{CertPem: out.CertPEM}, nil
+}
+
+// PreRegisterAgent (ControlPlaneService) creates a pending agent and mints its
+// single-use enrollment token, returning the raw token once. Operator/ops action
+// — runs under the caller's authenticated org ctx.
+func (s *AgentServer) PreRegisterAgent(ctx context.Context, req *augurv1.PreRegisterAgentRequest) (*augurv1.PreRegisterAgentResponse, error) {
+	orgID, err := uuid.Parse(req.GetOrganizationId())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid organization_id")
+	}
+	if req.GetAgentType() == "" {
+		return nil, status.Error(codes.InvalidArgument, "agent_type is required")
+	}
+	out, err := s.enrollment.PreRegisterAgent(ctx, usecase.PreRegisterAgentInput{
+		OrgID:            orgID,
+		AgentType:        req.GetAgentType(),
+		Hostname:         req.GetHostname(),
+		WorkloadBindings: req.GetWorkloadIds(),
+		TokenTTL:         time.Duration(req.GetTokenTtlSec()) * time.Second,
+	})
+	if err != nil {
+		return nil, enrollErrToStatus(err)
+	}
+	return &augurv1.PreRegisterAgentResponse{
+		AgentId:         out.AgentID.String(),
+		EnrollmentToken: out.RawToken,
+	}, nil
+}
+
+// RevokeAgent (ControlPlaneService) marks an agent identity revoked. Runs under
+// the caller's authenticated org ctx (the row is org-scoped so RLS confines it).
+func (s *AgentServer) RevokeAgent(ctx context.Context, req *augurv1.RevokeAgentRequest) (*augurv1.RevokeAgentResponse, error) {
+	agentID, err := uuid.Parse(req.GetAgentId())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid agent_id")
+	}
+	if err := s.enrollment.RevokeAgent(ctx, usecase.RevokeAgentInput{AgentID: agentID}); err != nil {
+		return nil, enrollErrToStatus(err)
+	}
+	return &augurv1.RevokeAgentResponse{Revoked: true}, nil
+}
+
+// enrollErrToStatus maps enrollment usecase/domain errors to gRPC status codes at
+// the handler boundary (root §16). A bad/expired/used token collapses to
+// PermissionDenied so it never leaks whether the token existed.
+func enrollErrToStatus(err error) error {
+	switch {
+	case errors.Is(err, usecase.ErrAgentPlaneDisabled):
+		return status.Error(codes.Unavailable, "agent plane disabled")
+	case errors.Is(err, domain.ErrEnrollmentTokenNotFound),
+		errors.Is(err, domain.ErrEnrollmentTokenExpired),
+		errors.Is(err, domain.ErrEnrollmentTokenConsumed):
+		return status.Error(codes.PermissionDenied, "invalid enrollment token")
+	case errors.Is(err, domain.ErrAgentRevoked):
+		return status.Error(codes.FailedPrecondition, "agent is revoked")
+	case errors.Is(err, domain.ErrAgentNotFound):
+		return status.Error(codes.NotFound, "agent not found")
+	case errors.Is(err, domain.ErrInvalidAgentOrg), errors.Is(err, domain.ErrInvalidAgentType):
+		return status.Error(codes.InvalidArgument, err.Error())
+	default:
+		return status.Error(codes.Internal, "enrollment failed")
+	}
 }
 
 // RegisterAgent handles edge agent registration

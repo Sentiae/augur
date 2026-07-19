@@ -31,6 +31,8 @@ type Config struct {
 // the agent plane isn't served until P5, so augur boots unchanged today.
 type AgentPlaneConfig struct {
 	Enabled bool `mapstructure:"enabled"`
+	// CertTTL bounds the lifetime of a signed per-agent cert (P4, D-177).
+	CertTTL time.Duration `mapstructure:"cert_ttl"`
 }
 
 // AppConfig contains application metadata
@@ -339,7 +341,8 @@ func Load() (*Config, error) {
 			"engine.post_deploy_observe_min":    15,
 
 			// Agent plane (P3+, D-177) — OFF until P5.
-			"agent_plane.enabled": false,
+			"agent_plane.enabled":  false,
+			"agent_plane.cert_ttl": "24h",
 		},
 		BindEnvs: [][2]string{
 			{"app.name", "APP_APP_NAME"},
@@ -382,6 +385,7 @@ func Load() (*Config, error) {
 			{"engine.observation_period_days", "APP_ENGINE_OBSERVATION_PERIOD_DAYS"},
 			{"engine.max_actions_per_hour", "APP_ENGINE_MAX_ACTIONS_PER_HOUR"},
 			{"agent_plane.enabled", "APP_AGENT_PLANE_ENABLED"},
+			{"agent_plane.cert_ttl", "APP_AGENT_PLANE_CERT_TTL"},
 		},
 	})
 	if err != nil {

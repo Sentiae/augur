@@ -334,8 +334,10 @@ var AgentPlaneService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	ControlPlaneService_DispatchDeploy_FullMethodName = "/augur.v1.ControlPlaneService/DispatchDeploy"
-	ControlPlaneService_GetAgentStatus_FullMethodName = "/augur.v1.ControlPlaneService/GetAgentStatus"
+	ControlPlaneService_DispatchDeploy_FullMethodName   = "/augur.v1.ControlPlaneService/DispatchDeploy"
+	ControlPlaneService_GetAgentStatus_FullMethodName   = "/augur.v1.ControlPlaneService/GetAgentStatus"
+	ControlPlaneService_PreRegisterAgent_FullMethodName = "/augur.v1.ControlPlaneService/PreRegisterAgent"
+	ControlPlaneService_RevokeAgent_FullMethodName      = "/augur.v1.ControlPlaneService/RevokeAgent"
 )
 
 // ControlPlaneServiceClient is the client API for ControlPlaneService service.
@@ -356,6 +358,13 @@ type ControlPlaneServiceClient interface {
 	// connected, plus its last-seen timestamp and workload bindings. B23 —
 	// lets callers heartbeat-poll augur without re-establishing a stream.
 	GetAgentStatus(ctx context.Context, in *GetAgentStatusRequest, opts ...grpc.CallOption) (*GetAgentStatusResponse, error)
+	// PreRegisterAgent creates a pending agent identity and mints a single-use
+	// enrollment token an operator hands to the agent out-of-band. The raw token
+	// is returned ONCE (only its hash is stored). P4 (D-177).
+	PreRegisterAgent(ctx context.Context, in *PreRegisterAgentRequest, opts ...grpc.CallOption) (*PreRegisterAgentResponse, error)
+	// RevokeAgent moves an agent identity to revoked so it can no longer enroll
+	// or renew. P4 (D-177).
+	RevokeAgent(ctx context.Context, in *RevokeAgentRequest, opts ...grpc.CallOption) (*RevokeAgentResponse, error)
 }
 
 type controlPlaneServiceClient struct {
@@ -386,6 +395,26 @@ func (c *controlPlaneServiceClient) GetAgentStatus(ctx context.Context, in *GetA
 	return out, nil
 }
 
+func (c *controlPlaneServiceClient) PreRegisterAgent(ctx context.Context, in *PreRegisterAgentRequest, opts ...grpc.CallOption) (*PreRegisterAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PreRegisterAgentResponse)
+	err := c.cc.Invoke(ctx, ControlPlaneService_PreRegisterAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlPlaneServiceClient) RevokeAgent(ctx context.Context, in *RevokeAgentRequest, opts ...grpc.CallOption) (*RevokeAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeAgentResponse)
+	err := c.cc.Invoke(ctx, ControlPlaneService_RevokeAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ControlPlaneServiceServer is the server API for ControlPlaneService service.
 // All implementations must embed UnimplementedControlPlaneServiceServer
 // for forward compatibility.
@@ -404,6 +433,13 @@ type ControlPlaneServiceServer interface {
 	// connected, plus its last-seen timestamp and workload bindings. B23 —
 	// lets callers heartbeat-poll augur without re-establishing a stream.
 	GetAgentStatus(context.Context, *GetAgentStatusRequest) (*GetAgentStatusResponse, error)
+	// PreRegisterAgent creates a pending agent identity and mints a single-use
+	// enrollment token an operator hands to the agent out-of-band. The raw token
+	// is returned ONCE (only its hash is stored). P4 (D-177).
+	PreRegisterAgent(context.Context, *PreRegisterAgentRequest) (*PreRegisterAgentResponse, error)
+	// RevokeAgent moves an agent identity to revoked so it can no longer enroll
+	// or renew. P4 (D-177).
+	RevokeAgent(context.Context, *RevokeAgentRequest) (*RevokeAgentResponse, error)
 	mustEmbedUnimplementedControlPlaneServiceServer()
 }
 
@@ -419,6 +455,12 @@ func (UnimplementedControlPlaneServiceServer) DispatchDeploy(context.Context, *D
 }
 func (UnimplementedControlPlaneServiceServer) GetAgentStatus(context.Context, *GetAgentStatusRequest) (*GetAgentStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAgentStatus not implemented")
+}
+func (UnimplementedControlPlaneServiceServer) PreRegisterAgent(context.Context, *PreRegisterAgentRequest) (*PreRegisterAgentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PreRegisterAgent not implemented")
+}
+func (UnimplementedControlPlaneServiceServer) RevokeAgent(context.Context, *RevokeAgentRequest) (*RevokeAgentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RevokeAgent not implemented")
 }
 func (UnimplementedControlPlaneServiceServer) mustEmbedUnimplementedControlPlaneServiceServer() {}
 func (UnimplementedControlPlaneServiceServer) testEmbeddedByValue()                             {}
@@ -477,6 +519,42 @@ func _ControlPlaneService_GetAgentStatus_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ControlPlaneService_PreRegisterAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PreRegisterAgentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlPlaneServiceServer).PreRegisterAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ControlPlaneService_PreRegisterAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlPlaneServiceServer).PreRegisterAgent(ctx, req.(*PreRegisterAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ControlPlaneService_RevokeAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeAgentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlPlaneServiceServer).RevokeAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ControlPlaneService_RevokeAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlPlaneServiceServer).RevokeAgent(ctx, req.(*RevokeAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ControlPlaneService_ServiceDesc is the grpc.ServiceDesc for ControlPlaneService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -491,6 +569,14 @@ var ControlPlaneService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAgentStatus",
 			Handler:    _ControlPlaneService_GetAgentStatus_Handler,
+		},
+		{
+			MethodName: "PreRegisterAgent",
+			Handler:    _ControlPlaneService_PreRegisterAgent_Handler,
+		},
+		{
+			MethodName: "RevokeAgent",
+			Handler:    _ControlPlaneService_RevokeAgent_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -48,6 +48,15 @@ service ControlPlaneService {
   // connected, plus its last-seen timestamp and workload bindings. B23 —
   // lets callers heartbeat-poll augur without re-establishing a stream.
   rpc GetAgentStatus(GetAgentStatusRequest) returns (GetAgentStatusResponse);
+
+  // PreRegisterAgent creates a pending agent identity and mints a single-use
+  // enrollment token an operator hands to the agent out-of-band. The raw token
+  // is returned ONCE (only its hash is stored). P4 (D-177).
+  rpc PreRegisterAgent(PreRegisterAgentRequest) returns (PreRegisterAgentResponse);
+
+  // RevokeAgent moves an agent identity to revoked so it can no longer enroll
+  // or renew. P4 (D-177).
+  rpc RevokeAgent(RevokeAgentRequest) returns (RevokeAgentResponse);
 }
 
 // EnrollRequest carries a one-time join token and a CSR for the agent's
@@ -74,6 +83,30 @@ message RenewRequest {
 
 message RenewResponse {
   string cert_pem = 1;
+}
+
+// PreRegisterAgentRequest is sent by an operator/ops caller to create a pending
+// agent and mint its single-use enrollment token. P4 (D-177).
+message PreRegisterAgentRequest {
+  string organization_id = 1;
+  string agent_type = 2;
+  string hostname = 3;
+  repeated string workload_ids = 4;
+  int32 token_ttl_sec = 5;
+}
+
+message PreRegisterAgentResponse {
+  string agent_id = 1;
+  string enrollment_token = 2; // raw token, returned once
+}
+
+// RevokeAgentRequest names the agent identity to revoke. P4 (D-177).
+message RevokeAgentRequest {
+  string agent_id = 1;
+}
+
+message RevokeAgentResponse {
+  bool revoked = 1;
 }
 
 // AgentMetricsReport is sent by edge agents every 10-60 seconds

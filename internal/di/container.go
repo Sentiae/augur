@@ -38,6 +38,7 @@ type Container struct {
 	SLORepo      *postgres.SLORepository
 	CostRepo     *postgres.CostRepository
 	MetricsRepo  *postgres.MetricsRepository
+	AgentRepo    *postgres.AgentRepository
 
 	// TenantResolver resolves owning orgs via the D-072 SECURITY DEFINER rls_*
 	// functions; used as the OrgLister for the cross-org loop sweeps (Model D) and
@@ -68,6 +69,7 @@ type Container struct {
 	RIRecommender          *usecase.RIRecommender
 	CrossClusterOptimizer  *usecase.CrossClusterOptimizer
 	SpecCreator            *usecase.SpecCreator
+	AgentEnrollment        *usecase.AgentEnrollmentService
 
 	// HTTP Server
 	HTTPServer *http.Server
@@ -330,6 +332,7 @@ func (c *Container) initRepositories() {
 	c.SLORepo = postgres.NewSLORepository(c.DB)
 	c.CostRepo = postgres.NewCostRepository(c.DB)
 	c.MetricsRepo = postgres.NewMetricsRepository(c.DB)
+	c.AgentRepo = postgres.NewAgentRepository(c.DB)
 
 	// Org resolver (D-072) — built on the app pool; the OrgLister for the loop
 	// sweeps and the OrgResolver for the HTTP/gRPC by-id handlers. Constructed
@@ -460,6 +463,21 @@ func (c *Container) initUseCases() {
 		c.WorkloadRepo,
 		c.Config.Features.SpecAutoCreation,
 	)
+
+	// Agent enrollment (P4, D-177). The signer is the Vault-PKI client, present
+	// only when the agent plane is enabled. It is assigned to the CertSigner
+	// interface via a nil-check so a disabled plane yields a TRUE nil interface
+	// (not a typed-nil *PKIClient wrapped in a non-nil interface) — the usecase's
+	// signer==nil fail-closed guard then works correctly.
+	var agentSigner usecase.CertSigner
+	if c.PKIClient != nil {
+		agentSigner = c.PKIClient
+	}
+	c.AgentEnrollment = usecase.NewAgentEnrollmentService(
+		c.AgentRepo,
+		agentSigner,
+		c.Config.AgentPlane.CertTTL,
+	)
 }
 
 // initConsumers sets up Kafka event consumers
@@ -514,6 +532,7 @@ func (c *Container) initGRPC() {
 		c.WorkloadService,
 		c.DecisionEngine,
 		c.TenantResolver,
+		c.AgentEnrollment,
 	)
 
 	if !c.Config.Server.GRPC.Enabled {

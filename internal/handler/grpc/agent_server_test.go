@@ -35,7 +35,7 @@ func (f fakeOrgResolver) ResolveDecisionOrg(context.Context, uuid.UUID) (uuid.UU
 // the nil decision engine is never reached. Called directly (not over the gRPC
 // server) to bypass the pre-existing auth-interceptor rejection.
 func TestAgentServer_ReportOutcome_UnknownDecision(t *testing.T) {
-	srv := internalgrpc.NewAgentServer(nil, nil, nil, nil, nil, fakeOrgResolver{decisionOrg: uuid.Nil})
+	srv := internalgrpc.NewAgentServer(nil, nil, nil, nil, nil, fakeOrgResolver{decisionOrg: uuid.Nil}, nil)
 
 	_, err := srv.ReportOutcome(context.Background(), &augurv1.ScalingOutcomeReport{
 		CommandId: uuid.New().String(),
@@ -49,7 +49,7 @@ func TestAgentServer_ReportOutcome_UnknownDecision(t *testing.T) {
 // TestAgentServer_ReportOutcome_RejectsInvalidCommandID — a non-uuid command_id is
 // an InvalidArgument before any org resolution.
 func TestAgentServer_ReportOutcome_RejectsInvalidCommandID(t *testing.T) {
-	srv := internalgrpc.NewAgentServer(nil, nil, nil, nil, nil, fakeOrgResolver{})
+	srv := internalgrpc.NewAgentServer(nil, nil, nil, nil, nil, fakeOrgResolver{}, nil)
 
 	_, err := srv.ReportOutcome(context.Background(), &augurv1.ScalingOutcomeReport{
 		CommandId: "not-a-uuid",
