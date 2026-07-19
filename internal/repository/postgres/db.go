@@ -7,8 +7,6 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
-
-	"github.com/sentiae/infrastructure-intelligence-service/internal/domain"
 )
 
 // Config holds database connection parameters
@@ -35,22 +33,6 @@ func NewDB(cfg Config) (*gorm.DB, error) {
 	}
 
 	return db, nil
-}
-
-// AutoMigrate runs GORM auto-migration for all domain models
-func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
-		&domain.Workload{},
-		&domain.WorkloadMetricsSnapshot{},
-		&domain.ScalingDecision{},
-		&domain.AugurPolicy{},
-		&domain.SLODefinition{},
-		&domain.SLOBurnRateLog{},
-		&domain.AugurAlert{},
-		&domain.CostBudget{},
-		&domain.IdleResource{},
-		&domain.ModelRegistry{},
-	)
 }
 
 // contextKey for transaction handling

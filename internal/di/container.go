@@ -129,7 +129,7 @@ func (c *Container) initDatabase() error {
 
 	pg := c.Config.Database.Postgres
 
-	// OWNER connection for schema DDL (AutoMigrate + RLS objects) — D-070 role
+	// OWNER connection for schema DDL (golang-migrate baseline incl. RLS) — D-070 role
 	// split. Uses MigrateUser/MigratePassword when set, else falls back to the app
 	// creds so an unsplit deploy connects as the same role as before. Short-lived
 	// and closed immediately after schema setup so no DDL-capable pool lingers.
@@ -150,22 +150,17 @@ func (c *Container) initDatabase() error {
 		return fmt.Errorf("open owner connection: %w", err)
 	}
 
-	// Auto-migrate domain models on the OWNER connection.
-	if err := postgres.AutoMigrate(ownerDB); err != nil {
+	// Schema substrate (CLAUDE.md §24): golang-migrate is the authoritative source
+	// (D-178). RunMigrations applies the embedded baseline on the OWNER connection —
+	// tables + indexes + tenant_isolation RLS + SECURITY DEFINER org resolvers all
+	// live in migrations/0001_baseline.up.sql, replacing the old AutoMigrate +
+	// ApplyRLSObjects boot path. Idempotent: an already-current DB is a no-op.
+	version, applied, err := postgres.RunMigrations(ownerDB)
+	if err != nil {
 		closeDB(ownerDB)
-		return fmt.Errorf("auto-migration failed: %w", err)
+		return fmt.Errorf("run migrations: %w", err)
 	}
-
-	// RLS objects (child org denormalization + backfill, tenant_isolation policies,
-	// SECURITY DEFINER org resolvers), flag-gated. Skipped when APP_RLS_STAMP_ENABLED
-	// is off → behavior-neutral shadow (no objects created; app stays superuser).
-	if config.RLSStampEnabled() {
-		if err := postgres.ApplyRLSObjects(ownerDB); err != nil {
-			closeDB(ownerDB)
-			return fmt.Errorf("apply RLS objects: %w", err)
-		}
-		logger.Info("RLS objects applied (policies + org-resolver fns)")
-	}
+	logger.Info("Database migrations completed: schema_version=%d applied=%t", version, applied)
 	closeDB(ownerDB)
 
 	// APP pool (long-lived). Post-flip these are the NOBYPASSRLS app creds.
