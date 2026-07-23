@@ -23,12 +23,17 @@ import (
 // controlPlaneAuthzMethods are the ControlPlaneService RPCs guarded by per-method
 // SVID service-authz on the mesh listener (P7a, D-179). A caller presenting a peer
 // SVID with no matching grant is denied; the ops→augur grant itself is DEFERRED to
-// P7b (no live caller yet), so these methods fail closed until then. GetAgentStatus
-// and DispatchDeploy are the only two service-to-service RPCs ops actuates; the P4
-// agent-identity RPCs (PreRegisterAgent/RevokeAgent) are governed separately.
+// P7b (no live caller yet), so these methods fail closed until then. All four
+// service-to-service ControlPlane RPCs are now guarded: DispatchDeploy/GetAgentStatus
+// (the deploy actuation ops drives) plus the P4 agent-identity RPCs
+// PreRegisterAgent/RevokeAgent (P7b, #augur-p7b-controlplane-client) — these mint
+// enrollment tokens / revoke agent identities, so they are grant-gated (deny-all
+// until a narrow ops-only grant lands) rather than open to any mesh-TCB peer SVID.
 var controlPlaneAuthzMethods = map[string]struct{}{
-	"/augur.v1.ControlPlaneService/DispatchDeploy": {},
-	"/augur.v1.ControlPlaneService/GetAgentStatus": {},
+	"/augur.v1.ControlPlaneService/DispatchDeploy":   {},
+	"/augur.v1.ControlPlaneService/GetAgentStatus":   {},
+	"/augur.v1.ControlPlaneService/PreRegisterAgent": {},
+	"/augur.v1.ControlPlaneService/RevokeAgent":      {},
 }
 
 // ServerConfig holds runtime options for the gRPC server wrapper.
