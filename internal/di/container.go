@@ -18,7 +18,9 @@ import (
 	"github.com/sentiae/infrastructure-intelligence-service/pkg/config"
 	"github.com/sentiae/infrastructure-intelligence-service/pkg/events"
 	"github.com/sentiae/infrastructure-intelligence-service/pkg/logger"
+	pkconfig "github.com/sentiae/platform-kit/config"
 	pkgmiddleware "github.com/sentiae/platform-kit/middleware"
+	"github.com/sentiae/platform-kit/posture"
 	"github.com/sentiae/platform-kit/tenant"
 	"github.com/sentiae/platform-kit/tenantdb"
 	"gorm.io/gorm"
@@ -48,6 +50,10 @@ type Container struct {
 	// JWKSValidator validates BFF-forwarded user Bearer tokens for the HTTP auth
 	// middleware (D-073). Nil when RLS enforcement is off and JWKS is unavailable.
 	JWKSValidator pkgmiddleware.TokenValidator
+
+	// Posture is the Wave-8 (D-179) fail-closed security-control set, proved at
+	// boot (MustHold) and enumerable at GET /posture via opshttp.PostureHandler.
+	Posture *posture.Set
 
 	// Use Cases
 	WorkloadService        *usecase.WorkloadService
@@ -116,6 +122,10 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 
 	if err := c.initAuth(); err != nil {
 		return nil, fmt.Errorf("failed to initialize auth: %w", err)
+	}
+
+	if err := c.initPosture(); err != nil {
+		return nil, fmt.Errorf("failed to initialize boot posture: %w", err)
 	}
 
 	if err := c.initAgentPlane(); err != nil {
@@ -271,6 +281,35 @@ func (c *Container) initAuth() error {
 	}
 	logger.Info("HTTP JWT auth enabled via JWKS (issuer: %s)", c.Config.Security.Auth.JWTIssuer)
 	c.JWKSValidator = jwks
+	return nil
+}
+
+// initPosture declares augur's real fail-closed security controls (Wave-8,
+// D-179) and proves them at boot. The mesh-mtls control is unconditional — the
+// gRPC control-plane listener is now the SPIRE-SVID mesh (grpcserver.New, P7a);
+// it must not run with mTLS off. MustHold fails boot loud if the control does
+// not hold, and the Set is served at GET /posture for external enumeration. An
+// empty/invalid declaration is itself a boot error (the disease inside the cure).
+func (c *Container) initPosture() error {
+	set, err := posture.Declare(
+		posture.Control{
+			Name: "mesh-mtls",
+			Assert: func(ctx context.Context) error {
+				if pkconfig.MTLSMode() == pkconfig.MTLSModeOff {
+					return fmt.Errorf("mesh service configured with mTLS off")
+				}
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("declare boot posture: %w", err)
+	}
+	if err := set.MustHold(context.Background()); err != nil {
+		return fmt.Errorf("boot posture assertion failed: %w", err)
+	}
+	c.Posture = set
+	logger.Info("Boot posture verified (mesh-mtls)")
 	return nil
 }
 
@@ -516,6 +555,7 @@ func (c *Container) initConsumers() {
 // initHandlers creates HTTP handlers
 func (c *Container) initHandlers() {
 	c.HTTPServer = http.NewServer(
+		c.Posture,
 		c.JWKSValidator,
 		c.Config.Security.Auth.ServiceAPIKey,
 		c.TenantResolver,
@@ -559,10 +599,10 @@ func (c *Container) initGRPC() {
 		Host:          c.Config.Server.GRPC.Host,
 		Port:          c.Config.Server.GRPC.Port,
 		ServiceAPIKey: c.Config.Security.Auth.ServiceAPIKey,
-		JWKSURL:       c.Config.Security.Auth.JWKSURL,
-		JWTIssuer:     c.Config.Security.Auth.JWTIssuer,
-		// When the agent plane is enabled the plaintext listener carries ONLY the
-		// control plane; the agent plane moves to the mTLS listener (D-177).
+		// The control plane is service-to-service; user JWTs never ride it, so no
+		// JWKS validator is wired. On the mesh (P7a, D-179) callers authenticate via
+		// their peer SVID. When the agent plane is enabled the mesh listener carries
+		// ONLY the control plane; the agent plane lives on the mTLS listener (D-177).
 		ControlPlaneOnly: c.Config.AgentPlane.Enabled,
 	}, c.AgentServer)
 }

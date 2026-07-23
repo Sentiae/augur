@@ -117,7 +117,7 @@ func (s *AgentServer) EnableIdentityEnforcement() {
 // agent plane is DISABLED (byte-identical to today: both planes on the plaintext
 // listener). When the plane is enabled DI splits them — RegisterControlPlaneOnly
 // on the plaintext listener, the agent plane on the mTLS listener (D-177).
-func (s *AgentServer) RegisterServer(srv *grpc.Server) {
+func (s *AgentServer) RegisterServer(srv grpc.ServiceRegistrar) {
 	augurv1.RegisterAgentPlaneServiceServer(srv, s)
 	augurv1.RegisterControlPlaneServiceServer(srv, s)
 }
@@ -125,7 +125,7 @@ func (s *AgentServer) RegisterServer(srv *grpc.Server) {
 // RegisterControlPlaneOnly registers ONLY the ControlPlaneService. Used on the
 // plaintext listener when the agent plane is enabled, so an agent (which reaches
 // only the mTLS listener) can never name a control-plane RPC (D-177).
-func (s *AgentServer) RegisterControlPlaneOnly(srv *grpc.Server) {
+func (s *AgentServer) RegisterControlPlaneOnly(srv grpc.ServiceRegistrar) {
 	augurv1.RegisterControlPlaneServiceServer(srv, s)
 }
 

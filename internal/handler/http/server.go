@@ -7,6 +7,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	pkgmiddleware "github.com/sentiae/platform-kit/middleware"
+	"github.com/sentiae/platform-kit/opshttp"
+	"github.com/sentiae/platform-kit/posture"
 
 	"github.com/sentiae/infrastructure-intelligence-service/internal/usecase"
 )
@@ -14,6 +16,7 @@ import (
 // Server is the HTTP server with all routes
 type Server struct {
 	router              chi.Router
+	posture             *posture.Set
 	jwks                pkgmiddleware.TokenValidator
 	serviceAPIKey       string
 	orgResolver         OrgResolver
@@ -33,6 +36,7 @@ type Server struct {
 }
 
 func NewServer(
+	postureSet *posture.Set,
 	jwks pkgmiddleware.TokenValidator,
 	serviceAPIKey string,
 	orgResolver OrgResolver,
@@ -51,6 +55,7 @@ func NewServer(
 	crossClusterOpt *usecase.CrossClusterOptimizer,
 ) *Server {
 	s := &Server{
+		posture:            postureSet,
 		jwks:               jwks,
 		serviceAPIKey:      serviceAPIKey,
 		orgResolver:        orgResolver,
@@ -93,6 +98,12 @@ func (s *Server) setupRoutes() {
 	r.Get("/ready", func(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
+
+	// Wave-8 (D-179): enumerate the boot-proved fail-closed security controls.
+	// Open (like /health, /ready) — introspection only, no secrets.
+	if s.posture != nil {
+		r.Method(http.MethodGet, "/posture", opshttp.PostureHandler("augur", s.posture))
+	}
 
 	// API v1 — authenticated surface. authMiddleware runs first so every route
 	// below requires a valid Bearer JWT (→ user principal) or x-api-key (→ service
