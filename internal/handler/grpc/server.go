@@ -98,15 +98,21 @@ func NewServer(cfg ServerConfig, agentServer *AgentServer) *Server {
 		},
 	})
 
-	// SVID-authz mesh policy (T-SEC-FND Wave 4 / P7a): governs per-method service
-	// authz. SetServiceGrants/SetMeshSVIDAuthzStrict configure the global policy;
-	// UnaryServiceAuthz enforces it on the ControlPlane service-to-service RPCs.
-	// Neutral at default env (strict=false, api-key callers pass); a mesh caller
-	// with a peer SVID and no grant is denied. The ops→augur grant is DEFERRED to
-	// P7b, so DispatchDeploy/GetAgentStatus fail closed for SVID callers until then.
-	grants := tenant.LoadMeshPolicy()
-	tenant.SetServiceGrants(grants)
+	// SVID-authz mesh policy (T-SEC-FND Wave 4 / P7a): SetServiceGrants installs the
+	// fleet cross-org policy consulted by CanActInOrg (the cross-org data-plane auth).
+	tenant.SetServiceGrants(tenant.LoadMeshPolicy())
 	tenant.SetMeshSVIDAuthzStrict(pkconfig.MeshSVIDAuthzStrict())
+
+	// ⚠ The ControlPlane's per-method authz is a SEPARATE, DEDICATED grant set —
+	// NOT LoadMeshPolicy(). The fleet policy grants every cross-org TCB SVID an
+	// EMPTY-Methods grant, which tenant.AllowsMethod treats as allow-ALL-methods
+	// (grants.go:68) — so passing it here would authorize all 10 TCB SVIDs on
+	// DispatchDeploy/GetAgentStatus, the opposite of least privilege. Instead we
+	// pass an EMPTY grant set: every caller is "unknown" → AllowsMethod denies →
+	// the ControlPlane's DispatchDeploy/GetAgentStatus are DENY-ALL, genuinely
+	// fail-closed. P7b replaces this with a narrow ops-only, method-scoped grant
+	// (NewServiceGrants{ops: {Methods: {DispatchDeploy, GetAgentStatus}}}).
+	controlPlaneGrants := tenant.NewServiceGrants(nil)
 
 	// D-072 RLS org-field stamping + P7a service-authz: appended AFTER the auth
 	// chain so the principal (peer SVID) is established first. UnaryOrgField
@@ -114,7 +120,7 @@ func NewServer(cfg ServerConfig, agentServer *AgentServer) *Server {
 	// GUC for RLS-scoped reads); UnaryServiceAuthz then enforces per-method grants.
 	// StreamOrgField is registration symmetry only — the MetricsStream org is
 	// handler-resolved per message.
-	unary = append(unary, tenant.UnaryOrgField(), tenant.UnaryServiceAuthz(controlPlaneAuthzMethods, grants))
+	unary = append(unary, tenant.UnaryOrgField(), tenant.UnaryServiceAuthz(controlPlaneAuthzMethods, controlPlaneGrants))
 	stream = append(stream, tenant.StreamOrgField())
 
 	// Health service — follows the identity-service golden reference pattern:
