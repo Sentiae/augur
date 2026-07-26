@@ -8,7 +8,7 @@ require (
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/cel-go v0.27.0
 	github.com/google/uuid v1.6.0
-	github.com/sentiae/platform-kit v0.3.3
+	github.com/sentiae/platform-kit v0.3.15
 	github.com/spiffe/go-spiffe/v2 v2.6.0
 	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
